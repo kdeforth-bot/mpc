@@ -294,7 +294,10 @@ async fn test_sign_v1_compatibility() -> anyhow::Result<()> {
             .await?;
         dbg!(&status);
 
-        await_request_in_contract_queue(&mpc_contract, &req.response.request, None).await?;
+        await_request_in_contract_queue(
+            mpc_contract.get_pending_request(req.response.request.clone()),
+        )
+        .await?;
 
         // Call `respond` as if we are the MPC network itself.
         submit_signature_response(&req.response, &contract, attested_account).await?;
