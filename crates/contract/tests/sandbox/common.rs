@@ -9,6 +9,7 @@ use crate::sandbox::utils::{
     shared_key_utils::{DomainKey, make_key_for_domain},
     sign_utils::{PendingSignRequest, make_and_submit_requests},
     transactions::{CallMpcContract, execute_async_handle_calls},
+    views::ViewMpcContract,
 };
 use digest::Digest;
 use dtos::ProtocolContractState;
@@ -29,6 +30,7 @@ use mpc_contract::{
     tee::tee_state::NodeId,
 };
 use near_account_id::AccountId;
+use near_contract_transport::WatchContractState;
 use near_mpc_bounded_collections::NonEmptyBTreeMap;
 use near_mpc_contract_interface::types::{
     AptosAddress, AptosEvent, AptosExtractedValue, AptosExtractor, AptosFinality, AptosRpcRequest,
@@ -57,7 +59,6 @@ use signature::hazmat::PrehashSigner;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 use test_utils::sandbox::SandboxWorker;
-use tokio_util::time::FutureExt as _;
 
 use super::utils::contract_build;
 
@@ -762,33 +763,20 @@ pub async fn make_foreign_chain_available(
 
 /// Poll the contract until a pending foreign-tx request appears (or panic after timeout).
 pub async fn await_pending_foreign_tx_request_observed_on_contract(
+    worker: &Worker<Sandbox>,
     contract: &Contract,
     request: &dtos::VerifyForeignTransactionRequest,
 ) {
     const TIMEOUT: Duration = Duration::from_secs(10);
-    const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-    async {
-        let args = json!({ "request": request });
-
-        loop {
-            let result = contract
-                .view(method_names::GET_PENDING_VERIFY_FOREIGN_TX_REQUEST)
-                .args_json(&args)
-                .await;
-            if let Ok(view) = result {
-                // The view returns Option<YieldIndex>; non-null means the request is pending.
-                let value: serde_json::Value = view.json().unwrap();
-                if !value.is_null() {
-                    return;
-                }
-            }
-            tokio::time::sleep(POLL_INTERVAL).await;
-        }
-    }
-    .timeout(TIMEOUT)
-    .await
-    .expect("Timed out waiting for pending foreign-tx request on-chain");
+    worker
+        .view_mpc(contract.id())
+        .get_pending_verify_foreign_tx_request(request.clone())
+        .subscribe()
+        .await
+        .wait_for(TIMEOUT, Option::is_some)
+        .await
+        .expect("Timed out waiting for pending foreign-tx request on-chain");
 }
 
 /// Sign a foreign-tx payload hash with the root secret key and return the

@@ -74,7 +74,12 @@ async fn verify_foreign_transaction__should_succeed(
         request: rpc_request,
     };
 
-    await_pending_foreign_tx_request_observed_on_contract(&setup.contract, &verify_request).await;
+    await_pending_foreign_tx_request_observed_on_contract(
+        &setup.worker,
+        &setup.contract,
+        &verify_request,
+    )
+    .await;
 
     let (payload, response) = sign_foreign_tx_response(
         &verify_request.request,
@@ -145,7 +150,12 @@ async fn verify_foreign_transaction__should_fan_out_response_to_duplicates_from_
         .verify_foreign_transaction(request_args.clone())
         .await
         .unwrap();
-    await_pending_foreign_tx_request_observed_on_contract(&setup.contract, &verify_request).await;
+    await_pending_foreign_tx_request_observed_on_contract(
+        &setup.worker,
+        &setup.contract,
+        &verify_request,
+    )
+    .await;
 
     let (payload, response) = sign_foreign_tx_response(
         &verify_request.request,
@@ -218,7 +228,12 @@ async fn respond_verify_foreign_tx__should_reject_response_not_matching_expected
         .verify_foreign_transaction(request_args)
         .await
         .unwrap();
-    await_pending_foreign_tx_request_observed_on_contract(&setup.contract, &verify_request).await;
+    await_pending_foreign_tx_request_observed_on_contract(
+        &setup.worker,
+        &setup.contract,
+        &verify_request,
+    )
+    .await;
 
     let (_payload, response) = sign_foreign_tx_response(
         &verify_request.request,
@@ -290,7 +305,12 @@ async fn verify_foreign_transaction__should_succeed_when_response_matches_expect
         .verify_foreign_transaction(request_args)
         .await
         .unwrap();
-    await_pending_foreign_tx_request_observed_on_contract(&setup.contract, &verify_request).await;
+    await_pending_foreign_tx_request_observed_on_contract(
+        &setup.worker,
+        &setup.contract,
+        &verify_request,
+    )
+    .await;
 
     let respond_result = setup.mpc_signer_accounts[0]
         .call(setup.contract.id(), method_names::RESPOND_VERIFY_FOREIGN_TX)

@@ -1,10 +1,12 @@
 use crate::sandbox::utils::transactions::CallMpcContract;
+use crate::sandbox::utils::views::{SandboxViewer, ViewMpcContract};
 
 use super::consts::DEFAULT_MAX_TIMEOUT_TX_INCLUDED;
 use super::shared_key_utils::{
     DomainKey, SharedSecretKey, derive_secret_key_ed25519, derive_secret_key_secp256k1,
     generate_random_app_public_key,
 };
+use anyhow::Context as _;
 use digest::{Digest, FixedOutput};
 use k256::{
     FieldBytes,
@@ -12,10 +14,10 @@ use k256::{
 };
 use mpc_contract::errors;
 use near_account_id::AccountId;
+use near_contract_transport::{ViewCall, WatchContractState};
 use near_mpc_contract_interface::call_args::SignatureRespondArgs;
-use near_mpc_contract_interface::method_names::{
-    GET_PENDING_CKD_REQUEST, GET_PENDING_REQUEST, RESPOND, RESPOND_CKD,
-};
+use near_mpc_contract_interface::client::MpcContractHandle;
+use near_mpc_contract_interface::method_names::{RESPOND, RESPOND_CKD};
 use near_mpc_contract_interface::types::kdf::{derive_app_id, derive_tweak};
 use near_mpc_contract_interface::types::{
     self as dtos, CKDAppPublicKey, CKDAppPublicKeyPV, CKDRequestArgs,
@@ -74,10 +76,11 @@ impl DomainResponseTest {
         &self,
         account: &Account,
         contract: &Contract,
+        worker: &Worker<Sandbox>,
         attested_account: &Account,
     ) -> anyhow::Result<()> {
         let status = self
-            .submit_request_ensure_included(account, contract)
+            .submit_request_ensure_included(account, contract, worker)
             .await?;
         self.submit_response(contract, attested_account).await?;
         self.verify_execution_outcome(status).await?;
@@ -103,17 +106,19 @@ impl DomainResponseTest {
         &self,
         account: &Account,
         contract: &Contract,
+        worker: &Worker<Sandbox>,
     ) -> anyhow::Result<TransactionStatus> {
         let handle = account.call_mpc_async(contract.id());
+        let viewer = worker.view_mpc(contract.id());
         match self {
             Self::Sign(inner) => {
                 let status = handle.sign(inner.args.clone()).await?;
-                await_request_in_contract_queue(contract, &inner.response.request, None).await?;
+                await_request_in_contract_queue(&viewer, &inner.response.request, None).await?;
                 Ok(status)
             }
             Self::CKD(inner) => {
                 let status = handle.request_app_private_key(inner.args.clone()).await?;
-                await_request_in_contract_queue(contract, &inner.response.request, None).await?;
+                await_request_in_contract_queue(&viewer, &inner.response.request, None).await?;
                 Ok(status)
             }
         }
@@ -312,53 +317,45 @@ pub async fn submit_ckd_response_measure_gas(
     Ok(gas)
 }
 
-trait ContractQueueRequest: serde::Serialize + Sync {
-    async fn is_in_queue(&self, contract: &Contract) -> Option<YieldIndex>;
+pub trait ContractQueueRequest {
+    fn pending_in(
+        &self,
+        contract: &MpcContractHandle<SandboxViewer>,
+    ) -> ViewCall<SandboxViewer, Option<YieldIndex>>;
 }
 
 impl ContractQueueRequest for CKDRequest {
-    async fn is_in_queue(&self, contract: &Contract) -> Option<YieldIndex> {
-        contract
-            .view(GET_PENDING_CKD_REQUEST)
-            .args_json(serde_json::json!({ "request": self }))
-            .await
-            .unwrap()
-            .json()
-            .unwrap()
+    fn pending_in(
+        &self,
+        contract: &MpcContractHandle<SandboxViewer>,
+    ) -> ViewCall<SandboxViewer, Option<YieldIndex>> {
+        contract.get_pending_ckd_request(self.clone())
     }
 }
 
 impl ContractQueueRequest for SignatureRequest {
-    async fn is_in_queue(&self, contract: &Contract) -> Option<YieldIndex> {
-        contract
-            .view(GET_PENDING_REQUEST)
-            .args_json(serde_json::json!({ "request": self }))
-            .await
-            .unwrap()
-            .json()
-            .unwrap()
+    fn pending_in(
+        &self,
+        contract: &MpcContractHandle<SandboxViewer>,
+    ) -> ViewCall<SandboxViewer, Option<YieldIndex>> {
+        contract.get_pending_request(self.clone())
     }
 }
 
-async fn await_request_in_contract_queue<T: ContractQueueRequest>(
-    contract: &Contract,
+pub async fn await_request_in_contract_queue<T: ContractQueueRequest>(
+    contract: &MpcContractHandle<SandboxViewer>,
     request: &T,
     max_timeout: Option<Duration>,
 ) -> anyhow::Result<()> {
     let timeout = max_timeout.unwrap_or(DEFAULT_MAX_TIMEOUT_TX_INCLUDED);
-    let start = std::time::Instant::now();
-
-    loop {
-        if request.is_in_queue(contract).await.is_some() {
-            return Ok(());
-        }
-
-        if start.elapsed() >= timeout {
-            anyhow::bail!("timed out waiting for request to appear in queue");
-        }
-
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    request
+        .pending_in(contract)
+        .subscribe()
+        .await
+        .wait_for(timeout, Option::is_some)
+        .await
+        .context("waiting for request to appear in queue")?;
+    Ok(())
 }
 
 /// Derives a confidential key following <https://github.com/near/threshold-signatures/blob/main/docs/confidential_key_derivation.md>

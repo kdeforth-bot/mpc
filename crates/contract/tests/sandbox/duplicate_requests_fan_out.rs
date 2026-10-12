@@ -15,11 +15,14 @@ use crate::sandbox::{
             CKDResponseArgs, create_response_ckd, create_response_ed25519,
             create_response_secp256k1, submit_ckd_response, submit_signature_response,
         },
+        views::SandboxViewer,
     },
 };
+use anyhow::Context as _;
 use elliptic_curve::Group;
 use mpc_contract::MAX_PENDING_REQUEST_FAN_OUT;
 use near_account_id::AccountId;
+use near_contract_transport::{Json, ViewArgs, ViewContract, WatchContractState};
 use near_mpc_contract_interface::call_args::SignatureRespondArgs;
 use near_mpc_contract_interface::types::{
     Bls12381G1PublicKey, CKDAppPublicKey, CKDRequest, CKDRequestArgs, Protocol, SignRequestArgs,
@@ -171,6 +174,7 @@ async fn run_sign_fan_out(
     )
     .await?;
     wait_for_pending_signature_queue(
+        worker,
         contract,
         &response_args.request,
         u32::from(MAX_PENDING_REQUEST_FAN_OUT),
@@ -228,27 +232,23 @@ struct MakeDuplicateSignCallsArgs<'a> {
 /// built with `--features sandbox-test-methods` (see
 /// [`crate::sandbox::common::SandboxTestSetupBuilder::with_sandbox_test_methods`]).
 async fn wait_for_pending_signature_queue(
+    worker: &near_workspaces::Worker<near_workspaces::network::Sandbox>,
     contract: &near_workspaces::Contract,
     request: &near_mpc_contract_interface::types::SignatureRequest,
     expected_len: u32,
 ) -> anyhow::Result<()> {
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
-    loop {
-        let len: u32 = contract
-            .view("pending_signature_queue_len")
-            .args_json(serde_json::json!({ "request": request }))
-            .await?
-            .json()?;
-        if len >= expected_len {
-            return Ok(());
-        }
-        if std::time::Instant::now() >= deadline {
-            anyhow::bail!(
-                "timed out waiting for signature queue to reach {expected_len} (saw {len})"
-            );
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    let args = serde_json::to_vec(&serde_json::json!({ "request": request }))?;
+    SandboxViewer::new(worker)
+        .view::<u32, Json>(
+            contract.id().clone(),
+            ViewArgs::new("pending_signature_queue_len", args),
+        )
+        .subscribe()
+        .await
+        .wait_for(Duration::from_secs(30), |len| *len >= expected_len)
+        .await
+        .with_context(|| format!("waiting for signature queue to reach {expected_len}"))?;
+    Ok(())
 }
 
 /// CKD counterpart to [`run_sign_fan_out`].
@@ -269,6 +269,7 @@ async fn run_ckd_fan_out(
     )
     .await?;
     wait_for_pending_ckd_queue(
+        worker,
         contract,
         &response_args.request,
         u32::from(MAX_PENDING_REQUEST_FAN_OUT),
@@ -318,25 +319,23 @@ struct MakeDuplicateCkdCallsArgs<'a> {
 
 /// CKD counterpart to [`wait_for_pending_signature_queue`]; same rationale.
 async fn wait_for_pending_ckd_queue(
+    worker: &near_workspaces::Worker<near_workspaces::network::Sandbox>,
     contract: &near_workspaces::Contract,
     request: &CKDRequest,
     expected_len: u32,
 ) -> anyhow::Result<()> {
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
-    loop {
-        let len: u32 = contract
-            .view("pending_ckd_queue_len")
-            .args_json(serde_json::json!({ "request": request }))
-            .await?
-            .json()?;
-        if len >= expected_len {
-            return Ok(());
-        }
-        if std::time::Instant::now() >= deadline {
-            anyhow::bail!("timed out waiting for CKD queue to reach {expected_len} (saw {len})");
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    let args = serde_json::to_vec(&serde_json::json!({ "request": request }))?;
+    SandboxViewer::new(worker)
+        .view::<u32, Json>(
+            contract.id().clone(),
+            ViewArgs::new("pending_ckd_queue_len", args),
+        )
+        .subscribe()
+        .await
+        .wait_for(Duration::from_secs(30), |len| *len >= expected_len)
+        .await
+        .with_context(|| format!("waiting for CKD queue to reach {expected_len}"))?;
+    Ok(())
 }
 
 /// Generates a Bls12-381 G1 app public key from an arbitrary scalar so the test can
