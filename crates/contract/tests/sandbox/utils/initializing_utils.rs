@@ -1,4 +1,5 @@
 use dtos::KeyEventId;
+use near_mpc_contract_interface::client::MpcContractHandle;
 use near_mpc_contract_interface::method_names;
 use near_mpc_contract_interface::types::DomainConfig;
 use near_mpc_contract_interface::types::{self as dtos};
@@ -9,6 +10,7 @@ use super::{
     consts::GAS_FOR_VOTE_PK,
     mpc_contract::get_state,
     transactions::{execute_async_handle_calls, execute_async_transactions},
+    views::SandboxViewer,
 };
 
 pub async fn vote_add_domains(
@@ -25,10 +27,11 @@ pub async fn vote_add_domains(
 
 pub async fn start_keygen_instance(
     contract: &Contract,
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
     accounts: &[Account],
     key_event_id: KeyEventId,
 ) -> anyhow::Result<()> {
-    let state = get_state(contract).await;
+    let state = get_state(mpc_contract).await;
     let active = match &state {
         dtos::ProtocolContractState::Initializing(s) => {
             &s.generating_key.parameters.participants.participants

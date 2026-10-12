@@ -16,6 +16,7 @@ use crate::sandbox::{
             get_tee_accounts, prepay_attestation_grants, submit_participant_info,
             tee_verifier_account_id, total_gas_fee, vote_tee_verifier_change,
         },
+        views::SandboxViewer,
     },
 };
 use attestation_types::Measurements;
@@ -26,6 +27,7 @@ use mpc_contract::{
     tee::{tee_state::AttestationSubmissionError, test_utils::whitelist_dstack_in_state},
 };
 use mpc_primitives::hash::LauncherDockerComposeHash;
+use near_mpc_contract_interface::client::MpcContractHandle;
 use near_mpc_contract_interface::types as dtos;
 use near_sdk::state::ContractState;
 use near_workspaces::{
@@ -148,20 +150,23 @@ async fn submit_dstack(submitter: &Account, contract: &Contract) -> ExecutionFin
 async fn submit_dstack_verified(
     submitter: &Account,
     contract: &Contract,
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
 ) -> (ExecutionFinalResult, dtos::StoredAttestation) {
     let result = submit_dstack(submitter, contract).await;
     assert!(
         result.failures().is_empty(),
         "expected every receipt to succeed, got: {result:#?}"
     );
-    let stored = stored_fixture_attestation(contract)
+    let stored = stored_fixture_attestation(mpc_contract)
         .await
         .expect("a Verified submission must store an attestation");
     (result, stored)
 }
 
-async fn stored_fixture_attestation(contract: &Contract) -> Option<dtos::StoredAttestation> {
-    get_participant_attestation(contract, &p2p_tls_key().into())
+async fn stored_fixture_attestation(
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
+) -> Option<dtos::StoredAttestation> {
+    get_participant_attestation(mpc_contract, &p2p_tls_key().into())
         .await
         .unwrap()
 }
@@ -185,15 +190,15 @@ fn assert_failure_contains(result: &ExecutionFinalResult, expected_errors: &[&st
 
 async fn assert_submission_failed_cleanly(
     result: &ExecutionFinalResult,
-    contract: &Contract,
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
     submitter: &Account,
     balance_before: NearToken,
     expected_errors: &[&str],
 ) {
     assert_failure_contains(result, expected_errors);
-    let stored = stored_fixture_attestation(contract).await;
+    let stored = stored_fixture_attestation(mpc_contract).await;
     assert!(stored.is_none(), "nothing should be stored on failure");
-    let remaining = available_attestation_grants(contract, submitter.id())
+    let remaining = available_attestation_grants(mpc_contract, submitter.id())
         .await
         .unwrap();
     assert_eq!(
@@ -259,7 +264,7 @@ async fn tee_verifier_account_id__should_return_the_verifier_voted_in() {
         .unwrap();
 
     // Then
-    assert_eq!(tee_verifier_account_id(&setup.contract).await, verifier);
+    assert_eq!(tee_verifier_account_id(&setup.mpc_contract).await, verifier);
 }
 
 #[tokio::test]
@@ -288,7 +293,7 @@ async fn submit_participant_info__should_store_nothing_on_verifier_rejection() {
     // Then
     assert_submission_failed_cleanly(
         &result,
-        &setup.contract,
+        &setup.mpc_contract,
         submitter,
         balance_before,
         &[&TeeError::QuoteRejected {
@@ -320,7 +325,7 @@ async fn submit_participant_info__should_fail_and_store_nothing_when_verifier_un
     // Then
     assert_submission_failed_cleanly(
         &result,
-        &setup.contract,
+        &setup.mpc_contract,
         submitter,
         balance_before,
         &[&TeeError::VerifierUnavailable.to_string()],
@@ -334,7 +339,8 @@ async fn submit_participant_info__should_run_dcap_within_verifier_gas_budget() {
     let fx = setup_verified_fixture().await;
 
     // When
-    let (result, _) = submit_dstack_verified(&fx.submitter, &fx.setup.contract).await;
+    let (result, _) =
+        submit_dstack_verified(&fx.submitter, &fx.setup.contract, &fx.setup.mpc_contract).await;
 
     // Then
     let outcomes = result.outcomes();
@@ -343,7 +349,7 @@ async fn submit_participant_info__should_run_dcap_within_verifier_gas_budget() {
         .find(|outcome| outcome.executor_id == *fx.verifier.id())
         .expect("the verify_quote receipt must have executed on the verifier");
     let budget = Gas::from_tgas(
-        get_config(&fx.setup.contract)
+        get_config(&fx.setup.mpc_contract)
             .await
             .unwrap()
             .verifier_tera_gas,
@@ -360,7 +366,12 @@ async fn verify_quote_with_collateral_dates__should_run_within_verifier_gas_budg
         .dev_deploy(tee_verifier_contract_with_pinned_clock())
         .await
         .unwrap();
-    let budget = Gas::from_tgas(get_config(&setup.contract).await.unwrap().verifier_tera_gas);
+    let budget = Gas::from_tgas(
+        get_config(&setup.mpc_contract)
+            .await
+            .unwrap()
+            .verifier_tera_gas,
+    );
 
     // When
     let result = verifier
@@ -418,7 +429,7 @@ async fn submit_participant_info__should_fail_cleanly_when_verifier_gas_budget_t
     // Then: the failed promise is indistinguishable from a crashed verifier.
     assert_submission_failed_cleanly(
         &result,
-        &setup.contract,
+        &setup.mpc_contract,
         submitter,
         balance_before,
         &[&TeeError::VerifierUnavailable.to_string()],
@@ -433,7 +444,8 @@ async fn submit_participant_info__should_store_attestation_on_verified_quote() {
     let balance_before = fx.submitter.view_account().await.unwrap().balance;
 
     // When
-    let (result, stored) = submit_dstack_verified(&fx.submitter, &fx.setup.contract).await;
+    let (result, stored) =
+        submit_dstack_verified(&fx.submitter, &fx.setup.contract, &fx.setup.mpc_contract).await;
 
     // Then
     assert_eq!(
@@ -487,7 +499,8 @@ async fn submit_participant_info__should_reject_verified_quote_when_tls_key_owne
     // second submitter; only the ownership guard does.
     let fx = setup_verified_fixture().await;
     let owner = &fx.submitter;
-    let (_, stored_before) = submit_dstack_verified(owner, &fx.setup.contract).await;
+    let (_, stored_before) =
+        submit_dstack_verified(owner, &fx.setup.contract, &fx.setup.mpc_contract).await;
     let attacker = create_fixture_account(&fx.setup.worker, "fixture-node-b").await;
     let balance_before = attacker.view_account().await.unwrap().balance;
 
@@ -499,14 +512,14 @@ async fn submit_participant_info__should_reject_verified_quote_when_tls_key_owne
         &result,
         &[&AttestationSubmissionError::TlsKeyOwnedByOtherAccount.to_string()],
     );
-    let stored_after = stored_fixture_attestation(&fx.setup.contract)
+    let stored_after = stored_fixture_attestation(&fx.setup.mpc_contract)
         .await
         .expect("the owner's attestation must survive the attack");
     assert_eq!(
         stored_after, stored_before,
         "the owner's entry must be unchanged"
     );
-    let tee_accounts = get_tee_accounts(&fx.setup.contract).await.unwrap();
+    let tee_accounts = get_tee_accounts(&fx.setup.mpc_contract).await.unwrap();
     assert!(
         tee_accounts
             .iter()
@@ -533,7 +546,7 @@ async fn submit_participant_info__should_reject_verified_quote_when_compose_hash
     );
     assert_submission_failed_cleanly(
         &result,
-        &fx.setup.contract,
+        &fx.setup.mpc_contract,
         &fx.submitter,
         balance_before,
         &["failed verification", &expected_rejection],
@@ -557,7 +570,7 @@ async fn submit_participant_info__should_reject_verified_quote_when_submitter_ke
     // Then
     assert_submission_failed_cleanly(
         &result,
-        &fx.setup.contract,
+        &fx.setup.mpc_contract,
         submitter,
         balance_before,
         &["failed verification", "report_data"],

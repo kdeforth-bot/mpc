@@ -179,6 +179,7 @@ async fn migrate__should_carry_over_the_voted_in_tee_verifier(
     // Given
     let worker = test_utils::sandbox::start_sandbox().await?;
     let contract = deploy_old(&worker, network).await?;
+    let mpc_contract = worker.view_mpc(contract.id());
     init_old_contract(&worker, &contract, PARTICIPANT_LEN).await?;
 
     // When
@@ -187,7 +188,7 @@ async fn migrate__should_carry_over_the_voted_in_tee_verifier(
 
     // Then
     assert_eq!(
-        tee_verifier_account_id(&contract).await,
+        tee_verifier_account_id(&mpc_contract).await,
         bogus_tee_verifier_account_id()
     );
     Ok(())
@@ -262,7 +263,9 @@ async fn fill_stored_attestations(
         });
     futures::future::join_all(submissions).await;
 
-    let stored = get_tee_accounts(contract).await.unwrap();
+    let stored = get_tee_accounts(&worker.view_mpc(contract.id()))
+        .await
+        .unwrap();
     assert_eq!(stored.len(), total, "stored attestation count");
 
     tls_keys
@@ -277,10 +280,10 @@ async fn propose_upgrade_from_production_to_current_binary(
 ) {
     let worker = test_utils::sandbox::start_sandbox().await.unwrap();
     let contract = deploy_old(&worker, network).await.unwrap();
+    let mpc_contract = worker.view_mpc(contract.id());
     let (accounts, participants) = init_old_contract(&worker, &contract, PARTICIPANT_LEN)
         .await
         .unwrap();
-    let mpc_contract = worker.view_mpc(contract.id());
 
     submit_attestations(&contract, &accounts, &participants).await;
     let filler_keys =
@@ -314,13 +317,13 @@ async fn propose_upgrade_from_production_to_current_binary(
         "launcher hash should be voted in before the upgrade"
     );
 
-    let state_pre_upgrade: ProtocolContractState = get_state(&contract).await;
+    let state_pre_upgrade: ProtocolContractState = get_state(&mpc_contract).await;
 
     // TODO(#4513): switch to `vote_and_submit_contract_binary` once production runs the
     // vote-then-submit API.
     propose_and_vote_contract_binary(&accounts, &contract, current_contract()).await;
 
-    let state_post_upgrade: ProtocolContractState = get_state(&contract).await;
+    let state_post_upgrade: ProtocolContractState = get_state(&mpc_contract).await;
 
     assert_eq!(
         state_pre_upgrade, state_post_upgrade,
@@ -338,11 +341,11 @@ async fn propose_upgrade_from_production_to_current_binary(
     );
 
     assert_eq!(
-        get_tee_accounts(&contract).await.unwrap().len(),
+        get_tee_accounts(&mpc_contract).await.unwrap().len(),
         STORED_ATTESTATION_ENTRIES,
         "every stored attestation should survive migration"
     );
-    let migrated = get_participant_attestation(&contract, &filler_keys[0])
+    let migrated = get_participant_attestation(&mpc_contract, &filler_keys[0])
         .await
         .unwrap()
         .expect("a migrated attestation should still be readable");
@@ -372,6 +375,7 @@ async fn upgrade_preserves_state_and_requests(
 ) {
     let worker = test_utils::sandbox::start_sandbox().await.unwrap();
     let contract = deploy_old(&worker, network).await.unwrap();
+    let mpc_contract = worker.view_mpc(contract.id());
     let (accounts, participants) = init_old_contract(&worker, &contract, PARTICIPANT_LEN)
         .await
         .unwrap();
@@ -389,7 +393,7 @@ async fn upgrade_preserves_state_and_requests(
     )
     .await;
 
-    let state_pre_upgrade: ProtocolContractState = get_state(&contract).await;
+    let state_pre_upgrade: ProtocolContractState = get_state(&mpc_contract).await;
 
     assert!(healthcheck(&contract).await.unwrap());
     let contract = upgrade_to_new(contract).await.unwrap();
@@ -397,7 +401,7 @@ async fn upgrade_preserves_state_and_requests(
         .await
         .expect("❌ migration() failed");
 
-    let state_post_upgrade: ProtocolContractState = get_state(&contract).await;
+    let state_post_upgrade: ProtocolContractState = get_state(&mpc_contract).await;
 
     assert_eq!(
         state_pre_upgrade, state_post_upgrade,
@@ -431,10 +435,11 @@ async fn all_participants_get_valid_mock_attestation_for_soft_launch_upgrade() -
 {
     let worker = test_utils::sandbox::start_sandbox().await?;
     let contract = deploy_old(&worker, Network::Testnet).await?;
+    let mpc_contract = worker.view_mpc(contract.id());
 
     let (accounts, participants) = init_old_contract(&worker, &contract, PARTICIPANT_LEN).await?;
 
-    let initial_participants = get_participants(&contract).await?;
+    let initial_participants = get_participants(&mpc_contract).await?;
     let participant_set_is_not_empty = !initial_participants.participants.is_empty();
     assert!(
         participant_set_is_not_empty,
@@ -450,7 +455,7 @@ async fn all_participants_get_valid_mock_attestation_for_soft_launch_upgrade() -
         .expect("❌ Back compatibility check failed: migration() failed");
 
     let accounts_with_tee_attestation_post_upgrade: HashSet<AccountId> =
-        get_tee_accounts(&contract)
+        get_tee_accounts(&mpc_contract)
             .await
             .unwrap()
             .into_iter()
@@ -495,6 +500,7 @@ async fn upgrade_allows_new_request_types(
 
     let worker = test_utils::sandbox::start_sandbox().await.unwrap();
     let contract = deploy_old(&worker, network).await.unwrap();
+    let mpc_contract = worker.view_mpc(contract.id());
     let (accounts, participants) = init_old_contract(&worker, &contract, PARTICIPANT_LEN)
         .await
         .unwrap();
@@ -511,7 +517,7 @@ async fn upgrade_allows_new_request_types(
     )
     .await;
 
-    let state_pre_upgrade: ProtocolContractState = get_state(&contract).await;
+    let state_pre_upgrade: ProtocolContractState = get_state(&mpc_contract).await;
 
     assert!(healthcheck(&contract).await.unwrap());
     let contract = upgrade_to_new(contract).await.unwrap();
@@ -519,7 +525,7 @@ async fn upgrade_allows_new_request_types(
         .await
         .expect("❌ migration() failed");
 
-    let state_post_upgrade: ProtocolContractState = get_state(&contract).await;
+    let state_post_upgrade: ProtocolContractState = get_state(&mpc_contract).await;
 
     assert_eq!(
         state_pre_upgrade, state_post_upgrade,
@@ -545,8 +551,14 @@ async fn upgrade_allows_new_request_types(
     ];
 
     const EPOCH_ID: u64 = 0;
-    let added_domain_keys =
-        call_contract_key_generation(&domains_to_add, &accounts, &contract, EPOCH_ID).await;
+    let added_domain_keys = call_contract_key_generation(
+        &domains_to_add,
+        &accounts,
+        &contract,
+        &mpc_contract,
+        EPOCH_ID,
+    )
+    .await;
 
     let current_keys: Vec<DomainKey> = injected_contract_state
         .domain_keys

@@ -9,7 +9,7 @@ use crate::sandbox::utils::{
     shared_key_utils::{DomainKey, make_key_for_domain},
     sign_utils::{PendingSignRequest, make_and_submit_requests},
     transactions::{CallMpcContract, execute_async_handle_calls},
-    views::ViewMpcContract,
+    views::{SandboxViewer, ViewMpcContract},
 };
 use digest::Digest;
 use dtos::ProtocolContractState;
@@ -32,6 +32,7 @@ use mpc_contract::{
 use near_account_id::AccountId;
 use near_contract_transport::WatchContractState;
 use near_mpc_bounded_collections::NonEmptyBTreeMap;
+use near_mpc_contract_interface::client::MpcContractHandle;
 use near_mpc_contract_interface::types::{
     AptosAddress, AptosEvent, AptosExtractedValue, AptosExtractor, AptosFinality, AptosRpcRequest,
     AptosTxId, Curve, DomainConfig, DomainId, DomainPurpose, ProposeUpdateArgs, Protocol,
@@ -174,6 +175,7 @@ pub async fn init_contract_running(
 pub struct SandboxTestSetup {
     pub worker: SandboxWorker,
     pub contract: Contract,
+    pub mpc_contract: MpcContractHandle<SandboxViewer>,
     pub mpc_signer_accounts: Vec<Account>,
     pub keys: Vec<DomainKey>,
 }
@@ -331,9 +333,11 @@ impl SandboxTestSetupBuilder {
 
         submit_attestations(&contract, &accounts, &participants).await;
 
+        let mpc_contract = worker.view_mpc(contract.id());
         SandboxTestSetup {
             worker,
             contract,
+            mpc_contract,
             mpc_signer_accounts: accounts,
             keys,
         }
@@ -425,10 +429,17 @@ pub async fn vote_update_till_completion(
 pub async fn vote_and_submit_contract_binary(
     accounts: &[Account],
     contract: &Contract,
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
     new_contract_binary: &[u8],
 ) {
     let update = Update::Code(new_contract_binary.to_vec());
-    approve_contract_update(contract, accounts, near_mpc_sdk::update::hash(&update)).await;
+    approve_contract_update(
+        contract,
+        mpc_contract,
+        accounts,
+        near_mpc_sdk::update::hash(&update),
+    )
+    .await;
 
     let execution = accounts[0]
         .call_mpc(contract.id())
@@ -450,10 +461,11 @@ pub async fn vote_and_submit_contract_binary(
 
 pub async fn approve_contract_update(
     contract: &Contract,
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
     accounts: &[Account],
     update_hash: UpdateHash,
 ) {
-    let threshold = assert_running_return_threshold(contract).await.0 as usize;
+    let threshold = assert_running_return_threshold(mpc_contract).await.0 as usize;
     let mut transactions = Vec::with_capacity(threshold);
     for voter in &accounts[..threshold] {
         let transaction = voter
@@ -592,12 +604,13 @@ pub async fn call_contract_key_generation<const N: usize>(
     domains_to_add: &[DomainConfig; N],
     accounts: &[Account],
     contract: &Contract,
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
     expected_epoch_id: u64,
 ) -> [DomainKey; N] {
     let mut domain_keys = vec![];
 
     let existing_domains = {
-        let state: ProtocolContractState = get_state(contract).await;
+        let state: ProtocolContractState = get_state(mpc_contract).await;
         match state {
             ProtocolContractState::Running(state) => state.domains.domains.len(),
             _ => panic!("ProtocolContractState must be Running"),
@@ -608,7 +621,7 @@ pub async fn call_contract_key_generation<const N: usize>(
         .await
         .unwrap();
 
-    let state: ProtocolContractState = get_state(contract).await;
+    let state: ProtocolContractState = get_state(mpc_contract).await;
     match state {
         ProtocolContractState::Initializing(state) => {
             assert_eq!(
@@ -625,7 +638,7 @@ pub async fn call_contract_key_generation<const N: usize>(
             domain_id: dtos::DomainId(*domain.id),
             attempt_id: dtos::AttemptId(0),
         };
-        start_keygen_instance(contract, accounts, key_event_id)
+        start_keygen_instance(contract, mpc_contract, accounts, key_event_id)
             .await
             .unwrap();
         let (public_key, shared_secret_key) = make_key_for_domain(Curve::from(domain.protocol));
@@ -641,7 +654,7 @@ pub async fn call_contract_key_generation<const N: usize>(
             .unwrap();
     }
 
-    let state: ProtocolContractState = get_state(contract).await;
+    let state: ProtocolContractState = get_state(mpc_contract).await;
     match state {
         ProtocolContractState::Running(state) => {
             assert_eq!(state.keyset.epoch_id.0, expected_epoch_id);
@@ -673,7 +686,8 @@ pub async fn execute_key_generation_and_add_random_state(
     rng: &mut impl CryptoRngCore,
 ) -> InjectedContractState {
     const EPOCH_ID: u64 = 0;
-    let threshold = assert_running_return_threshold(contract).await;
+    let mpc_contract = worker.view_mpc(contract.id());
+    let threshold = assert_running_return_threshold(&mpc_contract).await;
 
     // 1. Submit a threshold proposal (raise threshold to threshold + 1).
     let dummy_threshold_parameters =
@@ -710,7 +724,8 @@ pub async fn execute_key_generation_and_add_random_state(
         },
     ];
     let domain_keys =
-        call_contract_key_generation(&domains_to_add, accounts, contract, EPOCH_ID).await;
+        call_contract_key_generation(&domains_to_add, accounts, contract, &mpc_contract, EPOCH_ID)
+            .await;
 
     // 3. Submit pending sign requests.
     let (pending_sign_requests, _) =
@@ -732,10 +747,11 @@ fn hash(code: &[u8]) -> [u8; 32] {
 pub async fn make_foreign_chain_available(
     chain: dtos::ForeignChain,
     contract: &Contract,
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
     accounts: &[Account],
 ) {
     let batch = NonEmptyBTreeMap::new(chain, test_utils::contract_types::dummy_chain_entry());
-    let threshold = assert_running_return_threshold(contract).await.0 as usize;
+    let threshold = assert_running_return_threshold(mpc_contract).await.0 as usize;
     assert!(
         accounts.len() >= threshold,
         "need at least {threshold} accounts to whitelist a chain, got {}",
@@ -763,14 +779,12 @@ pub async fn make_foreign_chain_available(
 
 /// Poll the contract until a pending foreign-tx request appears (or panic after timeout).
 pub async fn await_pending_foreign_tx_request_observed_on_contract(
-    worker: &Worker<Sandbox>,
-    contract: &Contract,
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
     request: &dtos::VerifyForeignTransactionRequest,
 ) {
     const TIMEOUT: Duration = Duration::from_secs(10);
 
-    worker
-        .view_mpc(contract.id())
+    mpc_contract
         .get_pending_verify_foreign_tx_request(request.clone())
         .subscribe()
         .await

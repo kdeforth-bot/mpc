@@ -1,5 +1,5 @@
 use crate::sandbox::utils::transactions::CallMpcContract;
-use crate::sandbox::utils::views::{SandboxViewer, ViewMpcContract};
+use crate::sandbox::utils::views::SandboxViewer;
 
 use super::consts::DEFAULT_MAX_TIMEOUT_TX_INCLUDED;
 use super::shared_key_utils::{
@@ -76,11 +76,11 @@ impl DomainResponseTest {
         &self,
         account: &Account,
         contract: &Contract,
-        worker: &Worker<Sandbox>,
+        mpc_contract: &MpcContractHandle<SandboxViewer>,
         attested_account: &Account,
     ) -> anyhow::Result<()> {
         let status = self
-            .submit_request_ensure_included(account, contract, worker)
+            .submit_request_ensure_included(account, contract, mpc_contract)
             .await?;
         self.submit_response(contract, attested_account).await?;
         self.verify_execution_outcome(status).await?;
@@ -106,19 +106,20 @@ impl DomainResponseTest {
         &self,
         account: &Account,
         contract: &Contract,
-        worker: &Worker<Sandbox>,
+        mpc_contract: &MpcContractHandle<SandboxViewer>,
     ) -> anyhow::Result<TransactionStatus> {
         let handle = account.call_mpc_async(contract.id());
-        let viewer = worker.view_mpc(contract.id());
         match self {
             Self::Sign(inner) => {
                 let status = handle.sign(inner.args.clone()).await?;
-                await_request_in_contract_queue(&viewer, &inner.response.request, None).await?;
+                await_request_in_contract_queue(mpc_contract, &inner.response.request, None)
+                    .await?;
                 Ok(status)
             }
             Self::CKD(inner) => {
                 let status = handle.request_app_private_key(inner.args.clone()).await?;
-                await_request_in_contract_queue(&viewer, &inner.response.request, None).await?;
+                await_request_in_contract_queue(mpc_contract, &inner.response.request, None)
+                    .await?;
                 Ok(status)
             }
         }

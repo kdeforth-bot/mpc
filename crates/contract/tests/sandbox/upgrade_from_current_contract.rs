@@ -36,6 +36,7 @@ async fn submit_contract_update__should_accept_a_payload_of_the_maximum_contract
     let SandboxTestSetup {
         worker: _worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         ..
     } = SandboxTestSetup::builder()
@@ -43,7 +44,13 @@ async fn submit_contract_update__should_accept_a_payload_of_the_maximum_contract
         .build()
         .await;
     let update = Update::Code(vec![0; 1536 * 1024 - 400]); //3900 seems to not work locally
-    approve_contract_update(&contract, &mpc_signer_accounts, hash(&update)).await;
+    approve_contract_update(
+        &contract,
+        &mpc_contract,
+        &mpc_signer_accounts,
+        hash(&update),
+    )
+    .await;
 
     // When
     let execution = mpc_signer_accounts[0]
@@ -90,6 +97,7 @@ async fn submit_contract_update__should_apply_an_approved_config() {
     let SandboxTestSetup {
         worker: _worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         ..
     } = SandboxTestSetup::builder()
@@ -119,13 +127,14 @@ async fn submit_contract_update__should_apply_an_approved_config() {
     };
 
     let update = Update::Config(new_config.clone());
-    let old_config: near_mpc_contract_interface::types::Config = contract
-        .view(method_names::CONFIG)
-        .await
-        .unwrap()
-        .json()
-        .unwrap();
-    approve_contract_update(&contract, &mpc_signer_accounts, hash(&update)).await;
+    let old_config = mpc_contract.config().await.unwrap().value;
+    approve_contract_update(
+        &contract,
+        &mpc_contract,
+        &mpc_signer_accounts,
+        hash(&update),
+    )
+    .await;
 
     // When
     let execution = mpc_signer_accounts[0]
@@ -139,12 +148,7 @@ async fn submit_contract_update__should_apply_an_approved_config() {
         execution.failures().is_empty(),
         "failed to apply the approved config: {execution:#?}"
     );
-    let config: near_mpc_contract_interface::types::Config = contract
-        .view(method_names::CONFIG)
-        .await
-        .unwrap()
-        .json()
-        .unwrap();
+    let config = mpc_contract.config().await.unwrap().value;
 
     assert_ne!(config, old_config);
     assert_eq!(config, new_config);
@@ -155,13 +159,20 @@ async fn submit_contract_update__should_apply_an_approved_code_update() {
     let SandboxTestSetup {
         worker: _worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         ..
     } = SandboxTestSetup::builder()
         .with_protocols(ALL_PROTOCOLS)
         .build()
         .await;
-    vote_and_submit_contract_binary(&mpc_signer_accounts, &contract, current_contract()).await;
+    vote_and_submit_contract_binary(
+        &mpc_signer_accounts,
+        &contract,
+        &mpc_contract,
+        current_contract(),
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -170,6 +181,7 @@ async fn submit_contract_update__should_keep_the_old_code_when_the_new_binary_is
     let SandboxTestSetup {
         worker: _worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         ..
     } = SandboxTestSetup::builder()
@@ -177,7 +189,13 @@ async fn submit_contract_update__should_keep_the_old_code_when_the_new_binary_is
         .build()
         .await;
     let update = invalid_contract_update();
-    approve_contract_update(&contract, &mpc_signer_accounts, hash(&update)).await;
+    approve_contract_update(
+        &contract,
+        &mpc_contract,
+        &mpc_signer_accounts,
+        hash(&update),
+    )
+    .await;
 
     // When
     let execution = mpc_signer_accounts[0]
@@ -215,13 +233,20 @@ async fn submit_contract_update__should_consume_the_approval() {
     let SandboxTestSetup {
         worker: _worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         ..
     } = SandboxTestSetup::builder()
         .with_protocols(ALL_PROTOCOLS)
         .build()
         .await;
-    vote_and_submit_contract_binary(&mpc_signer_accounts, &contract, current_contract()).await;
+    vote_and_submit_contract_binary(
+        &mpc_signer_accounts,
+        &contract,
+        &mpc_contract,
+        current_contract(),
+    )
+    .await;
 
     // When
     let execution = mpc_signer_accounts[0]
@@ -246,6 +271,7 @@ async fn submit_contract_update__should_apply_several_updates_in_sequence() {
     let SandboxTestSetup {
         worker: _worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         ..
     } = SandboxTestSetup::builder()
@@ -256,7 +282,13 @@ async fn submit_contract_update__should_apply_several_updates_in_sequence() {
     dbg!(contract.id());
     let number_of_updates = 3;
     for _ in 0..number_of_updates {
-        vote_and_submit_contract_binary(&mpc_signer_accounts, &contract, current_contract()).await;
+        vote_and_submit_contract_binary(
+            &mpc_signer_accounts,
+            &contract,
+            &mpc_contract,
+            current_contract(),
+        )
+        .await;
     }
 }
 
@@ -322,11 +354,12 @@ async fn submit_contract_update__should_apply_a_code_update_that_migrates_state(
     let SandboxTestSetup {
         worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         ..
     } = SandboxTestSetup::builder().build().await;
 
-    let participants = assert_running_return_participants(&contract)
+    let participants = assert_running_return_participants(&mpc_contract)
         .await
         .expect("Contract must be in running state.");
 
@@ -338,7 +371,13 @@ async fn submit_contract_update__should_apply_a_code_update_that_migrates_state(
         &mut OsRng,
     )
     .await;
-    vote_and_submit_contract_binary(&mpc_signer_accounts, &contract, migration_contract()).await;
+    vote_and_submit_contract_binary(
+        &mpc_signer_accounts,
+        &contract,
+        &mpc_contract,
+        migration_contract(),
+    )
+    .await;
 }
 
 #[tokio::test]

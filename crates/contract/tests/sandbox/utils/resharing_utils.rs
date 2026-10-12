@@ -2,11 +2,13 @@ use crate::sandbox::utils::{
     consts::GAS_FOR_VOTE_RESHARED,
     mpc_contract::get_state,
     transactions::{execute_async_handle_calls, execute_async_transactions},
+    views::SandboxViewer,
 };
 use dtos::{AttemptId, EpochId, KeyEventId};
 use mpc_contract::primitives::thresholds::{
     GovernanceThresholdParameters, ProposedGovernanceThresholdParameters,
 };
+use near_mpc_contract_interface::client::MpcContractHandle;
 use near_mpc_contract_interface::method_names;
 use near_mpc_contract_interface::types::{self as dtos, ProtocolContractState};
 use near_workspaces::{Account, Contract};
@@ -15,10 +17,11 @@ use std::collections::BTreeMap;
 
 pub async fn conclude_resharing(
     contract: &Contract,
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
     all_participants: &[Account],
     prospective_epoch_id: EpochId,
 ) -> anyhow::Result<()> {
-    let ProtocolContractState::Resharing(resharing_state) = get_state(contract).await else {
+    let ProtocolContractState::Resharing(resharing_state) = get_state(mpc_contract).await else {
         anyhow::bail!("expected resharing state");
     };
     if resharing_state.resharing_key.epoch_id != prospective_epoch_id {
@@ -35,11 +38,11 @@ pub async fn conclude_resharing(
             domain_id: domain_config.id,
             attempt_id: AttemptId(0),
         };
-        let state = get_state(contract).await;
+        let state = get_state(mpc_contract).await;
         if !matches!(state, ProtocolContractState::Resharing(_)) {
             anyhow::bail!("expected resharing state");
         }
-        start_reshare_instance(contract, all_participants, key_event_id).await?;
+        start_reshare_instance(contract, mpc_contract, all_participants, key_event_id).await?;
 
         vote_reshared(contract, all_participants, key_event_id).await?;
     }
@@ -89,10 +92,11 @@ pub async fn vote_new_parameters(
 
 pub async fn start_reshare_instance(
     contract: &Contract,
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
     accounts: &[Account],
     key_event_id: KeyEventId,
 ) -> anyhow::Result<()> {
-    let state = get_state(contract).await;
+    let state = get_state(mpc_contract).await;
     let active = match &state {
         ProtocolContractState::Initializing(s) => {
             &s.generating_key.parameters.participants.participants
@@ -147,6 +151,7 @@ pub async fn vote_reshared(
 pub async fn do_resharing(
     remaining_accounts: &[Account],
     contract: &Contract,
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
     new_threshold_parameters: GovernanceThresholdParameters,
     prospective_epoch_id: EpochId,
 ) -> anyhow::Result<()> {
@@ -158,6 +163,12 @@ pub async fn do_resharing(
         &[],
     )
     .await?;
-    conclude_resharing(contract, remaining_accounts, prospective_epoch_id).await?;
+    conclude_resharing(
+        contract,
+        mpc_contract,
+        remaining_accounts,
+        prospective_epoch_id,
+    )
+    .await?;
     Ok(())
 }

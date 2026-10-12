@@ -44,6 +44,7 @@ async fn reshare__should_leave_valid_non_participant_attestations_in_storage() -
     let SandboxTestSetup {
         worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         ..
     } = SandboxTestSetup::builder()
@@ -52,14 +53,14 @@ async fn reshare__should_leave_valid_non_participant_attestations_in_storage() -
         .await;
 
     // extract initial participants:
-    let initial_participants = assert_running_return_participants(&contract).await?;
-    let threshold = assert_running_return_threshold(&contract).await;
+    let initial_participants = assert_running_return_participants(&mpc_contract).await?;
+    let threshold = assert_running_return_threshold(&mpc_contract).await;
     let internal_initial_participants: Participants = (&initial_participants).into_contract_type();
     let expected_node_ids =
         build_sandbox_node_ids(&internal_initial_participants, &mpc_signer_accounts);
 
     // Verify TEE info for initial participants was added
-    let nodes_with_tees = get_tee_accounts(&contract).await.unwrap();
+    let nodes_with_tees = get_tee_accounts(&mpc_contract).await.unwrap();
     assert_eq!(nodes_with_tees, expected_node_ids);
 
     // Add two prospective Participants
@@ -97,7 +98,7 @@ async fn reshare__should_leave_valid_non_participant_attestations_in_storage() -
     expected_node_ids.insert(new_uid);
 
     // Verify TEE info for prospective participants was added and TEE info for initial participants persists
-    let initial_and_non_participants = get_tee_accounts(&contract).await.unwrap();
+    let initial_and_non_participants = get_tee_accounts(&mpc_contract).await.unwrap();
     assert_eq!(initial_and_non_participants, expected_node_ids);
 
     // Now, we do a resharing. We only retain `threshold` of the initial participants
@@ -131,13 +132,14 @@ async fn reshare__should_leave_valid_non_participant_attestations_in_storage() -
     do_resharing(
         &mpc_signer_accounts[..threshold.0 as usize],
         &contract,
+        &mpc_contract,
         new_threshold_parameters,
         prospective_epoch_id,
     )
     .await?;
 
     // Verify contract is back to running state with new threshold
-    let final_participants = assert_running_return_participants(&contract)
+    let final_participants = assert_running_return_participants(&mpc_contract)
         .await
         .expect("Expected contract to be in Running state after resharing.");
 
@@ -151,7 +153,7 @@ async fn reshare__should_leave_valid_non_participant_attestations_in_storage() -
 
     // Verify TEE storage: valid attestations previously stored are still present — the
     // post-reshare `clean_invalid_attestations` sweep only evicts invalid / expired entries.
-    let tee_participants_after_reshare = get_tee_accounts(&contract).await.unwrap();
+    let tee_participants_after_reshare = get_tee_accounts(&mpc_contract).await.unwrap();
     assert_eq!(tee_participants_after_reshare, expected_node_ids);
 
     Ok(())
@@ -170,6 +172,7 @@ async fn reshare__should_evict_expired_attestations_via_post_reshare_sweep() -> 
     let SandboxTestSetup {
         worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         ..
     } = SandboxTestSetup::builder()
@@ -177,8 +180,8 @@ async fn reshare__should_evict_expired_attestations_via_post_reshare_sweep() -> 
         .build()
         .await;
 
-    let initial_participants = assert_running_return_participants(&contract).await?;
-    let threshold = assert_running_return_threshold(&contract).await;
+    let initial_participants = assert_running_return_participants(&mpc_contract).await?;
+    let threshold = assert_running_return_threshold(&mpc_contract).await;
     let initial_participants_count = initial_participants.participants.len();
 
     // Insert an attestation from an outsider whose expiry is a few seconds away.
@@ -203,7 +206,7 @@ async fn reshare__should_evict_expired_attestations_via_post_reshare_sweep() -> 
     .await?;
     assert!(submit_result.is_success());
     assert_eq!(
-        get_tee_accounts(&contract).await.unwrap().len(),
+        get_tee_accounts(&mpc_contract).await.unwrap().len(),
         initial_participants_count + 1
     );
 
@@ -237,6 +240,7 @@ async fn reshare__should_evict_expired_attestations_via_post_reshare_sweep() -> 
     do_resharing(
         &mpc_signer_accounts[..threshold.0 as usize],
         &contract,
+        &mpc_contract,
         new_threshold_parameters,
         dtos::EpochId(6),
     )
@@ -244,7 +248,7 @@ async fn reshare__should_evict_expired_attestations_via_post_reshare_sweep() -> 
 
     // The expired outsider attestation is evicted by the `clean_invalid_attestations`
     // promise spawned from `vote_reshared`.
-    let tee_accounts_after_reshare = get_tee_accounts(&contract).await.unwrap();
+    let tee_accounts_after_reshare = get_tee_accounts(&mpc_contract).await.unwrap();
     assert!(
         !tee_accounts_after_reshare
             .iter()

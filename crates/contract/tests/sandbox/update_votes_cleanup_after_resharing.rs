@@ -6,7 +6,6 @@ use crate::sandbox::{
         },
         resharing_utils::do_resharing,
         transactions::execute_async_handle_calls,
-        views::ViewMpcContract,
     },
 };
 use anyhow::Result;
@@ -30,8 +29,9 @@ async fn vote_reshared__should_sweep_contract_update_votes_of_kicked_out_partici
 {
     // Given
     let SandboxTestSetup {
-        worker,
+        worker: _worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         ..
     } = SandboxTestSetup::builder()
@@ -39,8 +39,8 @@ async fn vote_reshared__should_sweep_contract_update_votes_of_kicked_out_partici
         .build()
         .await;
 
-    let initial_participants = assert_running_return_participants(&contract).await?;
-    let threshold = assert_running_return_threshold(&contract).await;
+    let initial_participants = assert_running_return_participants(&mpc_contract).await?;
+    let threshold = assert_running_return_threshold(&mpc_contract).await;
 
     let update_hash = hash(&Update::Code(vec![1u8; 1000]));
     execute_async_handle_calls(&mpc_signer_accounts[0..2], &contract, |handle| {
@@ -49,9 +49,8 @@ async fn vote_reshared__should_sweep_contract_update_votes_of_kicked_out_partici
     })
     .await?;
 
-    let contract_handle = worker.view_mpc(contract.id());
     let votes_before: BTreeMap<ProposalHash, BTreeSet<AccountId>> =
-        contract_handle.contract_update_votes().await?.value;
+        mpc_contract.contract_update_votes().await?.value;
 
     assert_eq!(
         votes_before,
@@ -88,15 +87,16 @@ async fn vote_reshared__should_sweep_contract_update_votes_of_kicked_out_partici
     do_resharing(
         &mpc_signer_accounts[1..threshold.0 as usize + 1],
         &contract,
+        &mpc_contract,
         new_threshold_parameters,
         prospective_epoch_id,
     )
     .await?;
 
     // Then
-    let final_participants = assert_running_return_participants(&contract).await?;
+    let final_participants = assert_running_return_participants(&mpc_contract).await?;
     let votes_after: BTreeMap<ProposalHash, BTreeSet<AccountId>> =
-        contract_handle.contract_update_votes().await?.value;
+        mpc_contract.contract_update_votes().await?.value;
 
     assert_eq!(
         votes_after,
@@ -124,6 +124,7 @@ async fn add_domain_votes_from_kicked_out_participants_are_cleared_after_reshari
     let SandboxTestSetup {
         worker: _worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         ..
     } = SandboxTestSetup::builder()
@@ -131,11 +132,11 @@ async fn add_domain_votes_from_kicked_out_participants_are_cleared_after_reshari
         .build()
         .await;
 
-    let initial_participants = assert_running_return_participants(&contract).await?;
-    let threshold = assert_running_return_threshold(&contract).await;
+    let initial_participants = assert_running_return_participants(&mpc_contract).await?;
+    let threshold = assert_running_return_threshold(&mpc_contract).await;
 
     let next_domain_id = {
-        let state: dtos::ProtocolContractState = get_state(&contract).await;
+        let state: dtos::ProtocolContractState = get_state(&mpc_contract).await;
         let dtos::ProtocolContractState::Running(running) = &state else {
             panic!("Expected running state");
         };
@@ -153,7 +154,7 @@ async fn add_domain_votes_from_kicked_out_participants_are_cleared_after_reshari
     })
     .await?;
 
-    let state: dtos::ProtocolContractState = get_state(&contract).await;
+    let state: dtos::ProtocolContractState = get_state(&mpc_contract).await;
     let dtos::ProtocolContractState::Running(running) = &state else {
         panic!("Expected running state");
     };
@@ -189,13 +190,14 @@ async fn add_domain_votes_from_kicked_out_participants_are_cleared_after_reshari
     do_resharing(
         &mpc_signer_accounts[1..threshold.0 as usize + 1],
         &contract,
+        &mpc_contract,
         new_threshold_parameters,
         prospective_epoch_id,
     )
     .await?;
 
     // Then
-    let final_state: dtos::ProtocolContractState = get_state(&contract).await;
+    let final_state: dtos::ProtocolContractState = get_state(&mpc_contract).await;
     let dtos::ProtocolContractState::Running(final_running) = &final_state else {
         panic!("Expected running state after resharing");
     };

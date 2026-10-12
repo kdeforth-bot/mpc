@@ -1,15 +1,17 @@
 use std::collections::BTreeSet;
 
 use crate::sandbox::utils::transactions::CallMpcContract;
+use crate::sandbox::utils::views::SandboxViewer;
 
 use super::transactions::{all_receipts_successful, execute_async_handle_calls};
 use mpc_contract::tee::tee_state::NodeId;
 use mpc_primitives::hash::{LauncherImageHash, NodeImageHash, TeeVerifierCodeHash};
 use near_mpc_contract_interface::{
+    client::MpcContractHandle,
     method_names,
     types::{
-        Attestation, Config, Ed25519PublicKey, GovernanceThreshold, Participants,
-        ProtocolContractState, StoredAttestation,
+        Attestation, Config, Ed25519PublicKey, GetAttestationResponse, GovernanceThreshold,
+        Participants, ProtocolContractState, StoredAttestation,
     },
 };
 use near_workspaces::{
@@ -24,21 +26,18 @@ pub fn total_gas_fee(result: &ExecutionFinalResult) -> NearToken {
         .fold(NearToken::ZERO, NearToken::saturating_add)
 }
 
-pub async fn get_config(contract: &Contract) -> anyhow::Result<Config> {
-    Ok(contract.view(method_names::CONFIG).await?.json()?)
+pub async fn get_config(mpc_contract: &MpcContractHandle<SandboxViewer>) -> anyhow::Result<Config> {
+    Ok(mpc_contract.config().await?.value)
 }
 
-pub async fn get_state(contract: &Contract) -> ProtocolContractState {
-    contract
-        .view(method_names::STATE)
-        .await
-        .unwrap()
-        .json()
-        .unwrap()
+pub async fn get_state(mpc_contract: &MpcContractHandle<SandboxViewer>) -> ProtocolContractState {
+    mpc_contract.state().await.unwrap().value
 }
 
-pub async fn get_participants(contract: &Contract) -> anyhow::Result<Participants> {
-    let state = get_state(contract).await;
+pub async fn get_participants(
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
+) -> anyhow::Result<Participants> {
+    let state = get_state(mpc_contract).await;
     let ProtocolContractState::Running(running) = state else {
         panic!("Expected running state")
     };
@@ -46,24 +45,25 @@ pub async fn get_participants(contract: &Contract) -> anyhow::Result<Participant
     Ok(running.parameters.participants)
 }
 
-pub async fn get_tee_accounts(contract: &Contract) -> anyhow::Result<BTreeSet<NodeId>> {
-    Ok(contract
-        .view(method_names::GET_TEE_ACCOUNTS)
+pub async fn get_tee_accounts(
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
+) -> anyhow::Result<BTreeSet<NodeId>> {
+    Ok(mpc_contract
+        .get_tee_accounts()
         .await?
-        .json::<Vec<NodeId>>()?
+        .value
         .into_iter()
         .collect())
 }
 
 pub async fn available_attestation_grants(
-    contract: &Contract,
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
     account_id: &AccountId,
 ) -> anyhow::Result<u32> {
-    Ok(contract
-        .view(method_names::AVAILABLE_ATTESTATION_GRANTS)
-        .args_json(serde_json::json!({ "account_id": account_id }))
+    Ok(mpc_contract
+        .available_attestation_grants(account_id.clone())
         .await?
-        .json()?)
+        .value)
 }
 
 pub async fn prepay_attestation_grants(
@@ -123,33 +123,34 @@ pub async fn submit_participant_info(
         .map_err(Into::into)
 }
 
-pub async fn tee_verifier_account_id(contract: &Contract) -> AccountId {
-    contract
-        .view(method_names::TEE_VERIFIER_ACCOUNT_ID)
-        .await
-        .unwrap()
-        .json()
-        .unwrap()
+pub async fn tee_verifier_account_id(mpc_contract: &MpcContractHandle<SandboxViewer>) -> AccountId {
+    mpc_contract.tee_verifier_account_id().await.unwrap().value
 }
 
 pub async fn get_participant_attestation(
-    contract: &Contract,
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
     tls_key: &Ed25519PublicKey,
 ) -> anyhow::Result<Option<StoredAttestation>> {
-    Ok(contract
-        .view(method_names::GET_ATTESTATION)
-        .args_json(serde_json::json!({
-            "tls_public_key": tls_key
-        }))
-        .await?
-        .json()?)
+    let stored =
+        mpc_contract
+            .get_attestation(tls_key)
+            .await?
+            .value
+            .map(|response| match response {
+                GetAttestationResponse::Current(stored) => stored,
+                GetAttestationResponse::Legacy(attestation) => StoredAttestation {
+                    attestation,
+                    accepted_at_seconds: None,
+                },
+            });
+    Ok(stored)
 }
 
 pub async fn assert_running_return_participants(
-    contract: &Contract,
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
 ) -> anyhow::Result<Participants> {
     // Verify contract is back to running state with new threshold
-    let final_state: ProtocolContractState = contract.view(method_names::STATE).await?.json()?;
+    let final_state: ProtocolContractState = mpc_contract.state().await?.value;
     let ProtocolContractState::Running(running_state) = final_state else {
         panic!(
             "Expected contract to be in Running state after resharing, but got: {:?}",
@@ -159,8 +160,10 @@ pub async fn assert_running_return_participants(
     Ok(running_state.parameters.participants)
 }
 
-pub async fn assert_running_return_threshold(contract: &Contract) -> GovernanceThreshold {
-    let final_state: ProtocolContractState = get_state(contract).await;
+pub async fn assert_running_return_threshold(
+    mpc_contract: &MpcContractHandle<SandboxViewer>,
+) -> GovernanceThreshold {
+    let final_state: ProtocolContractState = get_state(mpc_contract).await;
     let ProtocolContractState::Running(running_state) = final_state else {
         panic!(
             "Expected contract to be in Running state: {:?}",

@@ -9,7 +9,6 @@ use crate::sandbox::{
             verify_timeout,
         },
         transactions::CallMpcContract,
-        views::ViewMpcContract,
     },
 };
 use anyhow::Context;
@@ -36,6 +35,7 @@ async fn test_contract_request_all_schemes() -> anyhow::Result<()> {
     let SandboxTestSetup {
         worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         keys,
     } = SandboxTestSetup::builder()
@@ -61,7 +61,7 @@ async fn test_contract_request_all_schemes() -> anyhow::Result<()> {
         for key in &keys {
             {
                 let req = DomainResponseTest::new(&mut rng, key, predecessor_id);
-                req.run(&alice, &contract, &worker, attested_account)
+                req.run(&alice, &contract, &mpc_contract, attested_account)
                     .await
                     .with_context(|| format!("{:?}", req))
                     .unwrap();
@@ -77,6 +77,7 @@ async fn test_contract_request_timeout_all_schemes() -> anyhow::Result<()> {
     let SandboxTestSetup {
         worker,
         contract,
+        mpc_contract,
         keys,
         ..
     } = SandboxTestSetup::builder()
@@ -90,7 +91,7 @@ async fn test_contract_request_timeout_all_schemes() -> anyhow::Result<()> {
         // Check that a sign with no response from MPC network properly errors out:
         let req = DomainResponseTest::new(&mut rng, key, predecessor_id);
         let status = req
-            .submit_request_ensure_included(&alice, &contract, &worker)
+            .submit_request_ensure_included(&alice, &contract, &mpc_contract)
             .await?;
         worker.fast_forward(SIGNATURE_TIMEOUT_BLOCKS).await.unwrap();
         verify_timeout(status).await.unwrap();
@@ -103,6 +104,7 @@ async fn test_contract_success_refund_all_schemes() -> anyhow::Result<()> {
     let SandboxTestSetup {
         worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         keys,
     } = SandboxTestSetup::builder()
@@ -118,7 +120,7 @@ async fn test_contract_success_refund_all_schemes() -> anyhow::Result<()> {
 
     for key in &keys {
         let req = DomainResponseTest::new(&mut rng, key, alice.id());
-        req.run(&alice, &contract, &worker, attested_account)
+        req.run(&alice, &contract, &mpc_contract, attested_account)
             .await?;
 
         let new_balance = alice.view_account().await?.balance;
@@ -147,6 +149,7 @@ async fn test_contract_fail_refund_all_schemes() -> anyhow::Result<()> {
     let SandboxTestSetup {
         worker,
         contract,
+        mpc_contract,
         keys,
         ..
     } = SandboxTestSetup::builder()
@@ -161,7 +164,7 @@ async fn test_contract_fail_refund_all_schemes() -> anyhow::Result<()> {
     for key in &keys {
         let req = DomainResponseTest::new(&mut rng, key, alice.id());
         let status = req
-            .submit_request_ensure_included(&alice, &contract, &worker)
+            .submit_request_ensure_included(&alice, &contract, &mpc_contract)
             .await?;
         worker.fast_forward(SIGNATURE_TIMEOUT_BLOCKS).await.unwrap();
         // we do not respond, sign will fail due to timeout
@@ -252,8 +255,9 @@ async fn test_contract_request_deposits_all_schemes() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_sign_v1_compatibility() -> anyhow::Result<()> {
     let SandboxTestSetup {
-        worker,
+        worker: _worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         keys,
         ..
@@ -271,7 +275,6 @@ async fn test_sign_v1_compatibility() -> anyhow::Result<()> {
     };
     let attested_account = &mpc_signer_accounts[0];
     let predecessor_id = contract.id();
-    let mpc_contract = worker.view_mpc(contract.id());
 
     for _ in 0..NUM_MSGS {
         let req = gen_secp_256k1_sign_test(&mut rng, key.domain_id(), predecessor_id, sk);
@@ -361,6 +364,7 @@ async fn test_contract_ckd_pv_request() -> anyhow::Result<()> {
     let SandboxTestSetup {
         worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         keys,
     } = SandboxTestSetup::builder()
@@ -377,7 +381,7 @@ async fn test_contract_ckd_pv_request() -> anyhow::Result<()> {
     let alice = worker.dev_create_account().await?;
     let req = CKDRequestTest::new_pv(&mut rng, bls_key.domain_id(), alice.id(), sk);
     let test = DomainResponseTest::CKD(req);
-    test.run(&alice, &contract, &worker, attested_account)
+    test.run(&alice, &contract, &mpc_contract, attested_account)
         .await
         .with_context(|| format!("{:?}", test))?;
 
@@ -396,6 +400,7 @@ async fn test_ckd_gas_regression() -> anyhow::Result<()> {
     let SandboxTestSetup {
         worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         keys,
     } = SandboxTestSetup::builder()
@@ -414,7 +419,7 @@ async fn test_ckd_gas_regression() -> anyhow::Result<()> {
     let legacy = CKDRequestTest::new(&mut rng, bls_key.domain_id(), alice.id(), sk);
     let legacy_test = DomainResponseTest::CKD(legacy);
     let legacy_request_status = legacy_test
-        .submit_request_ensure_included(&alice, &contract, &worker)
+        .submit_request_ensure_included(&alice, &contract, &mpc_contract)
         .await?;
     let legacy_respond_gas = match &legacy_test {
         DomainResponseTest::CKD(inner) => {
@@ -431,7 +436,7 @@ async fn test_ckd_gas_regression() -> anyhow::Result<()> {
     let pv = CKDRequestTest::new_pv(&mut rng, bls_key.domain_id(), bob.id(), sk);
     let pv_test = DomainResponseTest::CKD(pv);
     let pv_request_status = pv_test
-        .submit_request_ensure_included(&bob, &contract, &worker)
+        .submit_request_ensure_included(&bob, &contract, &mpc_contract)
         .await?;
     let pv_respond_gas = match &pv_test {
         DomainResponseTest::CKD(inner) => {

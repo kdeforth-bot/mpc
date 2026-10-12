@@ -11,6 +11,7 @@ use crate::sandbox::{
         mpc_contract::get_state,
         resharing_utils::{conclude_resharing, vote_cancel_reshaing, vote_new_parameters},
         transactions::{CallMpcContract, execute_async_handle_calls},
+        views::SandboxViewer,
     },
 };
 use dtos::{
@@ -23,11 +24,11 @@ use mpc_contract::primitives::{
         GovernanceThreshold, GovernanceThresholdParameters, ProposedGovernanceThresholdParameters,
     },
 };
+use near_mpc_contract_interface::client::MpcContractHandle;
+use near_mpc_contract_interface::types as dtos;
 use near_mpc_contract_interface::types::ReconstructionThreshold;
-use near_mpc_contract_interface::{method_names, types as dtos};
 use near_workspaces::{Account, Contract};
 use rstest::rstest;
-use serde_json::json;
 use std::{assert_matches, collections::BTreeMap};
 use test_utils::sandbox::SandboxWorker;
 
@@ -36,13 +37,14 @@ async fn test_keygen() -> anyhow::Result<()> {
     let SandboxTestSetup {
         worker: _worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         ..
     } = SandboxTestSetup::builder()
         .with_protocols(ALL_PROTOCOLS)
         .build()
         .await;
-    let init_state = get_state(&contract).await;
+    let init_state = get_state(&mpc_contract).await;
     let ProtocolContractState::Running(ref init_running) = init_state else {
         panic!("expected running state");
     };
@@ -63,7 +65,7 @@ async fn test_keygen() -> anyhow::Result<()> {
     )
     .await
     .unwrap();
-    let state = get_state(&contract).await;
+    let state = get_state(&mpc_contract).await;
     let ProtocolContractState::Initializing(ref init) = state else {
         panic!("expected initializing state");
     };
@@ -88,7 +90,7 @@ async fn test_keygen() -> anyhow::Result<()> {
         domain_id: dtos::DomainId(domain_id),
         attempt_id: AttemptId(0),
     };
-    start_keygen_instance(&contract, &mpc_signer_accounts, key_event_id)
+    start_keygen_instance(&contract, &mpc_contract, &mpc_signer_accounts, key_event_id)
         .await
         .unwrap();
     let public_key: dtos::PublicKey = "ed25519:J75xXmF7WUPS3xCm3hy2tgwLCKdYM1iJd4BWF8sWVnae"
@@ -104,7 +106,7 @@ async fn test_keygen() -> anyhow::Result<()> {
     .unwrap();
 
     // ensure the protocol resumed running state and the public key was added
-    let state = get_state(&contract).await;
+    let state = get_state(&mpc_contract).await;
     let ProtocolContractState::Running(ref running) = state else {
         panic!("expected running state");
     };
@@ -126,13 +128,11 @@ async fn test_keygen() -> anyhow::Result<()> {
     assert_eq!(running.keyset.epoch_id, epoch_id);
 
     // verify that the contract's `public_key` view method returns the key for the new domain
-    let contract_public_key: dtos::PublicKey = contract
-        .view(method_names::PUBLIC_KEY)
-        .args_json(json!({"domain_id": domain_id}))
+    let contract_public_key = mpc_contract
+        .public_key(Some(dtos::DomainId(domain_id)))
         .await
         .unwrap()
-        .json()
-        .unwrap();
+        .value;
     assert_eq!(contract_public_key, public_key);
 
     Ok(())
@@ -143,13 +143,14 @@ async fn test_cancel_keygen() -> anyhow::Result<()> {
     let SandboxTestSetup {
         worker: _worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         ..
     } = SandboxTestSetup::builder()
         .with_protocols(ALL_PROTOCOLS)
         .build()
         .await;
-    let init_state = get_state(&contract).await;
+    let init_state = get_state(&mpc_contract).await;
     let ProtocolContractState::Running(ref init_running) = init_state else {
         panic!("expected running state");
     };
@@ -179,7 +180,7 @@ async fn test_cancel_keygen() -> anyhow::Result<()> {
         .await
         .unwrap();
 
-        let state = get_state(&contract).await;
+        let state = get_state(&mpc_contract).await;
         let ProtocolContractState::Initializing(ref init) = state else {
             panic!("expected initializing state");
         };
@@ -212,7 +213,7 @@ async fn test_cancel_keygen() -> anyhow::Result<()> {
         .unwrap();
 
         // ensure we return to running state and that no key was registered
-        let state = get_state(&contract).await;
+        let state = get_state(&mpc_contract).await;
         let ProtocolContractState::Running(ref running) = state else {
             panic!("expected running state");
         };
@@ -227,9 +228,8 @@ async fn test_cancel_keygen() -> anyhow::Result<()> {
         assert_eq!(running.domains.domains.len(), ALL_PROTOCOLS.len());
 
         // verify that the contract's `public_key` view method fails for the cancelled domain
-        let public_key_result = contract
-            .view(method_names::PUBLIC_KEY)
-            .args_json(json!({"domain_id": next_domain_id}))
+        let public_key_result = mpc_contract
+            .public_key(Some(dtos::DomainId(next_domain_id)))
             .await;
         assert!(
             public_key_result.is_err(),
@@ -248,6 +248,7 @@ async fn test_resharing() -> anyhow::Result<()> {
     let ResharingTestContext {
         _worker,
         contract,
+        mpc_contract,
         persistent_participants,
         initial_running_state,
         new_participant_accounts,
@@ -263,11 +264,16 @@ async fn test_resharing() -> anyhow::Result<()> {
             .0
             + 1,
     );
-    conclude_resharing(&contract, &all_accounts, prospective_epoch_id)
-        .await
-        .unwrap();
+    conclude_resharing(
+        &contract,
+        &mpc_contract,
+        &all_accounts,
+        prospective_epoch_id,
+    )
+    .await
+    .unwrap();
 
-    let state: ProtocolContractState = get_state(&contract).await;
+    let state: ProtocolContractState = get_state(&mpc_contract).await;
     match state {
         ProtocolContractState::Running(state) => {
             assert_eq!(
@@ -287,6 +293,7 @@ async fn test_repropose_resharing() -> anyhow::Result<()> {
     let ResharingTestContext {
         _worker,
         contract,
+        mpc_contract,
         persistent_participants,
         initial_running_state,
         ..
@@ -312,7 +319,7 @@ async fn test_repropose_resharing() -> anyhow::Result<()> {
     .await
     .unwrap();
 
-    let state: ProtocolContractState = get_state(&contract).await;
+    let state: ProtocolContractState = get_state(&mpc_contract).await;
     match state {
         ProtocolContractState::Resharing(state) => {
             let state_params: GovernanceThresholdParameters =
@@ -328,6 +335,7 @@ async fn test_repropose_resharing() -> anyhow::Result<()> {
 struct ResharingTestContext {
     _worker: SandboxWorker,
     contract: Contract,
+    mpc_contract: MpcContractHandle<SandboxViewer>,
     persistent_participants: Vec<Account>,
     new_participant_accounts: Vec<Account>,
     threshold_parameters: GovernanceThresholdParameters,
@@ -342,6 +350,7 @@ async fn setup_resharing_state(
     let SandboxTestSetup {
         worker,
         contract,
+        mpc_contract,
         mpc_signer_accounts,
         ..
     } = SandboxTestSetup::builder()
@@ -350,7 +359,7 @@ async fn setup_resharing_state(
         .build()
         .await;
 
-    let state: ProtocolContractState = get_state(&contract).await;
+    let state: ProtocolContractState = get_state(&mpc_contract).await;
     let ProtocolContractState::Running(initial_running_state) = state else {
         panic!("State is not running: {:#?}", state)
     };
@@ -391,7 +400,7 @@ async fn setup_resharing_state(
     .unwrap();
 
     // Verify we're in resharing state
-    match get_state(&contract).await {
+    match get_state(&mpc_contract).await {
         ProtocolContractState::Resharing(state) => {
             assert_eq!(
                 state.resharing_key.parameters,
@@ -405,6 +414,7 @@ async fn setup_resharing_state(
     ResharingTestContext {
         _worker: worker,
         contract,
+        mpc_contract,
         persistent_participants: mpc_signer_accounts,
         new_participant_accounts: new_accounts,
         threshold_parameters: proposal,
@@ -421,6 +431,7 @@ async fn test_cancel_resharing_vote_is_idempotent(
     let ResharingTestContext {
         _worker,
         contract,
+        mpc_contract,
         persistent_participants,
         initial_running_state,
         ..
@@ -443,7 +454,7 @@ async fn test_cancel_resharing_vote_is_idempotent(
     }
 
     // Verify still in resharing state - multiple votes from same account don't count
-    let state = get_state(&contract).await;
+    let state = get_state(&mpc_contract).await;
     assert!(
         matches!(state, ProtocolContractState::Resharing(_)),
         "Contract should still be in resharing state. A threshold number of unique votes have not been cast."
@@ -456,7 +467,7 @@ async fn test_cancel_resharing_vote_is_idempotent(
         .unwrap();
 
     // Check that state transitions back to running
-    let new_state: ProtocolContractState = get_state(&contract).await;
+    let new_state: ProtocolContractState = get_state(&mpc_contract).await;
     let ProtocolContractState::Running(mut found) = new_state else {
         panic!("expected running state");
     };
@@ -486,6 +497,7 @@ async fn test_cancel_resharing_requires_threshold_votes(
     let ResharingTestContext {
         _worker,
         contract,
+        mpc_contract,
         persistent_participants,
         initial_running_state,
         ..
@@ -502,7 +514,7 @@ async fn test_cancel_resharing_requires_threshold_votes(
     .unwrap();
 
     // Verify still in resharing state (not cancelled yet)
-    let state: ProtocolContractState = get_state(&contract).await;
+    let state: ProtocolContractState = get_state(&mpc_contract).await;
     assert!(
         matches!(state, ProtocolContractState::Resharing(_)),
         "Should still be in resharing state with insufficient votes"
@@ -516,7 +528,7 @@ async fn test_cancel_resharing_requires_threshold_votes(
     assert!(result.is_success(), "{result:#?}");
 
     // Verify transition back to running state
-    let state: ProtocolContractState = get_state(&contract).await;
+    let state: ProtocolContractState = get_state(&mpc_contract).await;
     assert!(
         matches!(state, ProtocolContractState::Running(_)),
         "Should transition to running state after threshold votes"
@@ -559,6 +571,7 @@ async fn test_cancel_resharing_reverts_to_previous_running_state(
     let ResharingTestContext {
         _worker,
         contract,
+        mpc_contract,
         persistent_participants,
         initial_running_state,
         ..
@@ -571,7 +584,7 @@ async fn test_cancel_resharing_reverts_to_previous_running_state(
         .await
         .unwrap();
     // Check that state transitions back to running
-    let new_state = get_state(&contract).await;
+    let new_state = get_state(&mpc_contract).await;
 
     let ProtocolContractState::Running(mut new_running_state) = new_state else {
         panic!(
@@ -611,6 +624,7 @@ async fn test_cancelled_epoch_cannot_be_reused(
     let ResharingTestContext {
         _worker,
         contract,
+        mpc_contract,
         persistent_participants,
         new_participant_accounts,
         threshold_parameters,
@@ -633,7 +647,7 @@ async fn test_cancelled_epoch_cannot_be_reused(
     let prospective_epoch_id = dtos::EpochId(cancelled_epoch_id.0 + 1);
 
     // Verify state tracks cancelled epoch
-    let state = get_state(&contract).await;
+    let state = get_state(&mpc_contract).await;
     if let ProtocolContractState::Running(running_state) = state {
         assert_eq!(
             running_state.previously_cancelled_resharing_epoch_id,
@@ -670,7 +684,7 @@ async fn test_cancelled_epoch_cannot_be_reused(
     .unwrap();
 
     // Verify successful transition to resharing with correct epoch
-    let state = get_state(&contract).await;
+    let state = get_state(&mpc_contract).await;
     match state {
         ProtocolContractState::Resharing(resharing_contract_state) => {
             assert_eq!(
@@ -696,6 +710,7 @@ async fn test_successful_resharing_after_cancellation_clears_cancelled_epoch_id(
     let ResharingTestContext {
         _worker,
         contract,
+        mpc_contract,
         persistent_participants,
         new_participant_accounts,
         threshold_parameters,
@@ -718,7 +733,7 @@ async fn test_successful_resharing_after_cancellation_clears_cancelled_epoch_id(
     let prospective_epoch_id = dtos::EpochId(cancelled_epoch_id.0 + 1);
 
     // Verify cancellation tracked
-    let state: ProtocolContractState = get_state(&contract).await;
+    let state: ProtocolContractState = get_state(&mpc_contract).await;
     if let ProtocolContractState::Running(running_state) = state {
         assert_eq!(
             running_state.previously_cancelled_resharing_epoch_id,
@@ -739,7 +754,7 @@ async fn test_successful_resharing_after_cancellation_clears_cancelled_epoch_id(
     .unwrap();
 
     // Verify in resharing state
-    let state: ProtocolContractState = get_state(&contract).await;
+    let state: ProtocolContractState = get_state(&mpc_contract).await;
     match state {
         ProtocolContractState::Resharing(resharing_state) => {
             assert_eq!(resharing_state.resharing_key.epoch_id, prospective_epoch_id);
@@ -750,12 +765,17 @@ async fn test_successful_resharing_after_cancellation_clears_cancelled_epoch_id(
     // Step 3: Start reshare instance
     let mut all_participants = persistent_participants;
     all_participants.extend_from_slice(&new_participant_accounts);
-    conclude_resharing(&contract, &all_participants, prospective_epoch_id)
-        .await
-        .unwrap();
+    conclude_resharing(
+        &contract,
+        &mpc_contract,
+        &all_participants,
+        prospective_epoch_id,
+    )
+    .await
+    .unwrap();
 
     // Step 5: Verify final state
-    let state: ProtocolContractState = get_state(&contract).await;
+    let state: ProtocolContractState = get_state(&mpc_contract).await;
     match state {
         ProtocolContractState::Running(running_state) => {
             assert_eq!(
@@ -783,6 +803,7 @@ async fn vote_new_parameters_errors_if_new_participant_is_missing_valid_attestat
     let SandboxTestSetup {
         worker,
         contract,
+        mpc_contract,
         mut mpc_signer_accounts,
         ..
     } = SandboxTestSetup::builder()
@@ -790,7 +811,7 @@ async fn vote_new_parameters_errors_if_new_participant_is_missing_valid_attestat
         .build()
         .await;
 
-    let state = get_state(&contract).await;
+    let state = get_state(&mpc_contract).await;
     let ProtocolContractState::Running(ref running_state) = state else {
         panic!("expected running state");
     };
@@ -839,7 +860,7 @@ async fn vote_new_parameters_errors_if_new_participant_is_missing_valid_attestat
         );
     }
 
-    let state: ProtocolContractState = get_state(&contract).await;
+    let state: ProtocolContractState = get_state(&mpc_contract).await;
 
     assert_matches!(
         state,
