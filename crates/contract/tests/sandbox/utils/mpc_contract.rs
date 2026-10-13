@@ -8,8 +8,8 @@ use mpc_primitives::hash::{LauncherImageHash, NodeImageHash, TeeVerifierCodeHash
 use near_mpc_contract_interface::{
     method_names,
     types::{
-        Attestation, Config, Ed25519PublicKey, GovernanceThreshold, Participants,
-        ProtocolContractState, StoredAttestation,
+        Attestation, Config, Ed25519PublicKey, ExpectedMeasurements, GovernanceThreshold,
+        Participants, ProtocolContractState, StoredAttestation,
     },
 };
 use near_workspaces::{
@@ -191,6 +191,20 @@ pub async fn vote_add_launcher_hash(
     let result = account
         .call(contract.id(), method_names::VOTE_ADD_LAUNCHER_HASH)
         .args_json(serde_json::json!({"launcher_hash": launcher_hash}))
+        .transact()
+        .await?;
+    all_receipts_successful(result)?;
+    Ok(())
+}
+
+pub async fn vote_add_os_measurement(
+    account: &Account,
+    contract: &Contract,
+    measurement: &ExpectedMeasurements,
+) -> anyhow::Result<()> {
+    let result = account
+        .call(contract.id(), method_names::VOTE_ADD_OS_MEASUREMENT)
+        .args_json(serde_json::json!({"measurement": measurement}))
         .transact()
         .await?;
     all_receipts_successful(result)?;

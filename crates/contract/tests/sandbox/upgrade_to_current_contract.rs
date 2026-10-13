@@ -11,7 +11,7 @@ use crate::sandbox::{
         mpc_contract::{
             get_participant_attestation, get_participants, get_state, get_tee_accounts,
             prepay_and_submit_participant_info, tee_verifier_account_id, vote_add_launcher_hash,
-            vote_tee_verifier_change,
+            vote_add_os_measurement, vote_tee_verifier_change,
         },
         shared_key_utils::DomainKey,
         sign_utils::{make_and_submit_requests, submit_ckd_response, submit_signature_response},
@@ -321,6 +321,18 @@ async fn propose_upgrade_from_production_to_current_binary(
         .await
         .unwrap();
 
+    // Same for the OS measurement vote map.
+    let pending_measurement = dtos::ExpectedMeasurements {
+        mrtd: mpc_primitives::hash::MrtdHash::from([0xCD; 48]),
+        rtmr0: mpc_primitives::hash::Rtmr0Hash::from([0xCD; 48]),
+        rtmr1: mpc_primitives::hash::Rtmr1Hash::from([0xCD; 48]),
+        rtmr2: mpc_primitives::hash::Rtmr2Hash::from([0xCD; 48]),
+        key_provider_event_digest: mpc_primitives::hash::KeyProviderEventDigest::from([0xCD; 48]),
+    };
+    vote_add_os_measurement(&accounts[0], &contract, &pending_measurement)
+        .await
+        .unwrap();
+
     let state_pre_upgrade: ProtocolContractState = get_state(&contract).await;
 
     // TODO(#4513): switch to `vote_and_submit_contract_binary` once production runs the
@@ -354,6 +366,15 @@ async fn propose_upgrade_from_production_to_current_binary(
             .is_empty(),
         "pending launcher votes should be dropped by the migration"
     );
+    assert!(
+        mpc_contract
+            .os_measurement_votes()
+            .await
+            .unwrap()
+            .value
+            .is_empty(),
+        "pending OS measurement votes should be dropped by the migration"
+    );
 
     // Voting still works after the upgrade: a fresh threshold vote gets the hash in.
     let threshold = ((accounts.len() as f64) * 0.6).ceil() as usize;
@@ -370,6 +391,20 @@ async fn propose_upgrade_from_production_to_current_binary(
             .value
             .contains(&pending_launcher_hash),
         "a fresh launcher threshold vote should succeed after the upgrade"
+    );
+    for account in &accounts[..threshold] {
+        vote_add_os_measurement(account, &contract, &pending_measurement)
+            .await
+            .unwrap();
+    }
+    assert!(
+        mpc_contract
+            .allowed_os_measurements()
+            .await
+            .unwrap()
+            .value
+            .contains(&pending_measurement),
+        "a fresh OS measurement threshold vote should succeed after the upgrade"
     );
 
     assert_eq!(

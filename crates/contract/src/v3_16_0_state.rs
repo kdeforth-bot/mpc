@@ -26,7 +26,7 @@ use crate::{
     primitives::votes::Votes,
     state::ProtocolContractState,
     storage_keys::StorageKey,
-    tee::measurements::{AllowedMeasurements, MeasurementVotes},
+    tee::measurements::AllowedMeasurements,
     tee::proposal::{AllowedLauncherImages, StoredDockerImageHashes},
     tee::tee_state::{NodeAttestation, NodeId, TeeState},
     tee::verifier_votes::TeeVerifierVotes,
@@ -48,6 +48,12 @@ struct OldLauncherHashVotes {
     vote_by_account: BTreeMap<AuthenticatedParticipantId, dtos::LauncherVoteAction>,
 }
 
+/// Shadow of the `3.16.0` `MeasurementVotes` layout.
+#[derive(Debug, BorshSerialize, BorshDeserialize)]
+struct OldMeasurementVotes {
+    vote_by_account: BTreeMap<AuthenticatedParticipantId, dtos::MeasurementVoteAction>,
+}
+
 #[derive(Debug, BorshSerialize, BorshDeserialize)]
 struct OldTeeState {
     allowed_docker_image_hashes: StoredDockerImageHashes,
@@ -56,7 +62,7 @@ struct OldTeeState {
     launcher_votes: OldLauncherHashVotes,
     stored_attestations: IterableMap<dtos::Ed25519PublicKey, OldNodeAttestation>,
     allowed_measurements: AllowedMeasurements,
-    measurement_votes: MeasurementVotes,
+    measurement_votes: OldMeasurementVotes,
 }
 
 impl From<OldTeeState> for TeeState {
@@ -73,7 +79,10 @@ impl From<OldTeeState> for TeeState {
             ),
             stored_attestations: migrate_stored_attestations(old.stored_attestations),
             allowed_measurements: old.allowed_measurements,
-            measurement_votes: old.measurement_votes,
+            measurement_votes: Votes::new(
+                StorageKey::MeasurementVotesByVoter,
+                StorageKey::MeasurementVotesByProposal,
+            ),
         }
     }
 }
