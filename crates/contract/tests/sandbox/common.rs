@@ -596,7 +596,6 @@ pub async fn submit_attestations(
 pub async fn call_contract_key_generation<const N: usize>(
     domains_to_add: &[DomainConfig; N],
     accounts: &[Account],
-    contract: &Contract,
     mpc_contract: &MpcContractHandle<SandboxViewer>,
     expected_epoch_id: u64,
 ) -> [DomainKey; N] {
@@ -610,7 +609,7 @@ pub async fn call_contract_key_generation<const N: usize>(
         }
     };
 
-    vote_add_domains(contract, accounts, domains_to_add)
+    vote_add_domains(mpc_contract.contract_id(), accounts, domains_to_add)
         .await
         .unwrap();
 
@@ -642,9 +641,14 @@ pub async fn call_contract_key_generation<const N: usize>(
             domain_public_key: public_key.clone().try_into().unwrap(),
         });
 
-        vote_public_key(contract, accounts, key_event_id, public_key)
-            .await
-            .unwrap();
+        vote_public_key(
+            mpc_contract.contract_id(),
+            accounts,
+            key_event_id,
+            public_key,
+        )
+        .await
+        .unwrap();
     }
 
     let state: ProtocolContractState = get_state(mpc_contract).await;
@@ -717,8 +721,7 @@ pub async fn execute_key_generation_and_add_random_state(
         },
     ];
     let domain_keys =
-        call_contract_key_generation(&domains_to_add, accounts, contract, &mpc_contract, EPOCH_ID)
-            .await;
+        call_contract_key_generation(&domains_to_add, accounts, &mpc_contract, EPOCH_ID).await;
 
     // 3. Submit pending sign requests.
     let (pending_sign_requests, _) =
@@ -739,7 +742,6 @@ fn hash(code: &[u8]) -> [u8; 32] {
 /// Whitelists `chain` and registers it as covered by every node, making it available.
 pub async fn make_foreign_chain_available(
     chain: dtos::ForeignChain,
-    contract: &Contract,
     mpc_contract: &MpcContractHandle<SandboxViewer>,
     accounts: &[Account],
 ) {
@@ -750,14 +752,18 @@ pub async fn make_foreign_chain_available(
         "need at least {threshold} accounts to whitelist a chain, got {}",
         accounts.len()
     );
-    execute_async_handle_calls(&accounts[..threshold], contract, |handle| {
-        let batch = batch.clone();
-        async move { handle.vote_update_foreign_chain_providers(batch).await }
-    })
+    execute_async_handle_calls(
+        &accounts[..threshold],
+        mpc_contract.contract_id(),
+        |handle| {
+            let batch = batch.clone();
+            async move { handle.vote_update_foreign_chain_providers(batch).await }
+        },
+    )
     .await
     .expect("whitelist vote should succeed");
 
-    execute_async_handle_calls(accounts, contract, |handle| {
+    execute_async_handle_calls(accounts, mpc_contract.contract_id(), |handle| {
         let foreign_chains_config: dtos::ForeignChainsConfig = BTreeSet::from([chain]).into();
         let foreign_chains_config = foreign_chains_config.clone();
         async move {

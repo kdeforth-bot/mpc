@@ -867,13 +867,7 @@ async fn test_verify_tee_expired_attestation_triggers_resharing() -> Result<()> 
 
     // Complete resharing with the remaining participants (first 2)
     let remaining_accounts = &mpc_signer_accounts[..2];
-    conclude_resharing(
-        &contract,
-        &mpc_contract,
-        remaining_accounts,
-        prospective_epoch_id,
-    )
-    .await?;
+    conclude_resharing(&mpc_contract, remaining_accounts, prospective_epoch_id).await?;
 
     // Verify final state: 2 participants, target removed
     let final_participants = assert_running_return_participants(&mpc_contract).await?;

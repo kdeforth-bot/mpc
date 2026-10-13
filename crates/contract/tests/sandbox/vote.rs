@@ -54,7 +54,7 @@ async fn test_keygen() -> anyhow::Result<()> {
 
     // vote to add the domain and verify we enter initializing state
     vote_add_domains(
-        &contract,
+        contract.id(),
         &mpc_signer_accounts,
         &[DomainConfig {
             id: domain_id.into(),
@@ -97,7 +97,7 @@ async fn test_keygen() -> anyhow::Result<()> {
         .parse()
         .unwrap();
     vote_public_key(
-        &contract,
+        contract.id(),
         &mpc_signer_accounts,
         key_event_id,
         public_key.clone(),
@@ -168,7 +168,7 @@ async fn test_cancel_keygen() -> anyhow::Result<()> {
 
         // vote to start key generation
         vote_add_domains(
-            &contract,
+            contract.id(),
             &mpc_signer_accounts,
             &[DomainConfig {
                 id: next_domain_id.into(),
@@ -206,7 +206,7 @@ async fn test_cancel_keygen() -> anyhow::Result<()> {
         // send threshold votes to abort key generation
         execute_async_handle_calls(
             &mpc_signer_accounts[0..threshold],
-            &contract,
+            contract.id(),
             |handle| async move { handle.vote_cancel_keygen(next_domain_id + 1).await },
         )
         .await
@@ -247,7 +247,6 @@ async fn test_cancel_keygen() -> anyhow::Result<()> {
 async fn test_resharing() -> anyhow::Result<()> {
     let ResharingTestContext {
         _worker,
-        contract,
         mpc_contract,
         persistent_participants,
         initial_running_state,
@@ -264,14 +263,9 @@ async fn test_resharing() -> anyhow::Result<()> {
             .0
             + 1,
     );
-    conclude_resharing(
-        &contract,
-        &mpc_contract,
-        &all_accounts,
-        prospective_epoch_id,
-    )
-    .await
-    .unwrap();
+    conclude_resharing(&mpc_contract, &all_accounts, prospective_epoch_id)
+        .await
+        .unwrap();
 
     let state: ProtocolContractState = get_state(&mpc_contract).await;
     match state {
@@ -310,7 +304,7 @@ async fn test_repropose_resharing() -> anyhow::Result<()> {
     let proposal: GovernanceThresholdParameters =
         (&initial_running_state.parameters).into_contract_type();
     vote_new_parameters(
-        &contract,
+        contract.id(),
         prospective_epoch_id.0,
         &proposal,
         &persistent_participants,
@@ -390,7 +384,7 @@ async fn setup_resharing_state(
             + 1,
     );
     vote_new_parameters(
-        &contract,
+        contract.id(),
         prospective_epoch_id.0,
         &proposal,
         &mpc_signer_accounts,
@@ -462,9 +456,12 @@ async fn test_cancel_resharing_vote_is_idempotent(
 
     // Now vote with remaining accounts to reach threshold
     // account_1 already voted once, so we need (threshold - 1) more unique votes
-    vote_cancel_reshaing(&contract, &persistent_participants[1..initial_threshold])
-        .await
-        .unwrap();
+    vote_cancel_reshaing(
+        contract.id(),
+        &persistent_participants[1..initial_threshold],
+    )
+    .await
+    .unwrap();
 
     // Check that state transitions back to running
     let new_state: ProtocolContractState = get_state(&mpc_contract).await;
@@ -507,7 +504,7 @@ async fn test_cancel_resharing_requires_threshold_votes(
 
     // Vote with less than threshold (threshold - 1)
     vote_cancel_reshaing(
-        &contract,
+        contract.id(),
         &persistent_participants[0..initial_threshold - 1],
     )
     .await
@@ -580,9 +577,12 @@ async fn test_cancel_resharing_reverts_to_previous_running_state(
     let initial_threshold = initial_running_state.parameters.threshold.0 as usize;
 
     // Vote for cancellation with threshold of previous running participants
-    vote_cancel_reshaing(&contract, &persistent_participants[0..initial_threshold])
-        .await
-        .unwrap();
+    vote_cancel_reshaing(
+        contract.id(),
+        &persistent_participants[0..initial_threshold],
+    )
+    .await
+    .unwrap();
     // Check that state transitions back to running
     let new_state = get_state(&mpc_contract).await;
 
@@ -637,7 +637,7 @@ async fn test_cancelled_epoch_cannot_be_reused(
 
     // Cancel the resharing
     vote_cancel_reshaing(
-        &contract,
+        contract.id(),
         &persistent_participants[0..initial_threshold.0 as usize],
     )
     .await
@@ -674,7 +674,7 @@ async fn test_cancelled_epoch_cannot_be_reused(
 
     // Verify we can initiate resharing with the next epoch ID
     vote_new_parameters(
-        &contract,
+        contract.id(),
         prospective_epoch_id.0,
         &threshold_parameters,
         &persistent_participants,
@@ -723,7 +723,7 @@ async fn test_successful_resharing_after_cancellation_clears_cancelled_epoch_id(
 
     // Step 1: Cancel the resharing
     vote_cancel_reshaing(
-        &contract,
+        contract.id(),
         &persistent_participants[0..initial_threshold.0 as usize],
     )
     .await
@@ -744,7 +744,7 @@ async fn test_successful_resharing_after_cancellation_clears_cancelled_epoch_id(
 
     // Step 2: Initiate new resharing with next epoch ID
     vote_new_parameters(
-        &contract,
+        contract.id(),
         prospective_epoch_id.0,
         &threshold_parameters,
         &persistent_participants,
@@ -765,14 +765,9 @@ async fn test_successful_resharing_after_cancellation_clears_cancelled_epoch_id(
     // Step 3: Start reshare instance
     let mut all_participants = persistent_participants;
     all_participants.extend_from_slice(&new_participant_accounts);
-    conclude_resharing(
-        &contract,
-        &mpc_contract,
-        &all_participants,
-        prospective_epoch_id,
-    )
-    .await
-    .unwrap();
+    conclude_resharing(&mpc_contract, &all_participants, prospective_epoch_id)
+        .await
+        .unwrap();
 
     // Step 5: Verify final state
     let state: ProtocolContractState = get_state(&mpc_contract).await;

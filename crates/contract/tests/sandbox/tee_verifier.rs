@@ -60,9 +60,13 @@ async fn setup() -> SandboxTestSetup {
 
 async fn deploy_and_trust(setup: &SandboxTestSetup, wasm: &[u8]) -> Contract {
     let verifier = setup.worker.dev_deploy(wasm).await.unwrap();
-    vote_tee_verifier_change(&setup.mpc_signer_accounts, &setup.contract, verifier.id())
-        .await
-        .unwrap();
+    vote_tee_verifier_change(
+        &setup.mpc_signer_accounts,
+        setup.contract.id(),
+        verifier.id(),
+    )
+    .await
+    .unwrap();
     verifier
 }
 
@@ -259,7 +263,7 @@ async fn tee_verifier_account_id__should_return_the_verifier_voted_in() {
 
     // When
     let verifier: AccountId = "verifier.near".parse().unwrap();
-    vote_tee_verifier_change(&setup.mpc_signer_accounts, &setup.contract, &verifier)
+    vote_tee_verifier_change(&setup.mpc_signer_accounts, setup.contract.id(), &verifier)
         .await
         .unwrap();
 
@@ -311,7 +315,7 @@ async fn submit_participant_info__should_fail_and_store_nothing_when_verifier_un
     let missing_verifier: AccountId = "nonexistent-verifier.near".parse().unwrap();
     vote_tee_verifier_change(
         &setup.mpc_signer_accounts,
-        &setup.contract,
+        setup.contract.id(),
         &missing_verifier,
     )
     .await

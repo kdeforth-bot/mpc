@@ -82,7 +82,7 @@ async fn init_old_contract(
 ) -> anyhow::Result<(Vec<Account>, Participants)> {
     let (accounts, participants) =
         init_old_contract_without_tee_verifier(worker, contract, number_of_participants).await?;
-    vote_tee_verifier_change(&accounts, contract, &bogus_tee_verifier_account_id()).await?;
+    vote_tee_verifier_change(&accounts, contract.id(), &bogus_tee_verifier_account_id()).await?;
     Ok((accounts, participants))
 }
 
@@ -551,14 +551,8 @@ async fn upgrade_allows_new_request_types(
     ];
 
     const EPOCH_ID: u64 = 0;
-    let added_domain_keys = call_contract_key_generation(
-        &domains_to_add,
-        &accounts,
-        &contract,
-        &mpc_contract,
-        EPOCH_ID,
-    )
-    .await;
+    let added_domain_keys =
+        call_contract_key_generation(&domains_to_add, &accounts, &mpc_contract, EPOCH_ID).await;
 
     let current_keys: Vec<DomainKey> = injected_contract_state
         .domain_keys

@@ -3,7 +3,7 @@ use near_mpc_contract_interface::client::MpcContractHandle;
 use near_mpc_contract_interface::method_names;
 use near_mpc_contract_interface::types::DomainConfig;
 use near_mpc_contract_interface::types::{self as dtos};
-use near_workspaces::{Account, Contract};
+use near_workspaces::{Account, AccountId};
 use serde_json::json;
 
 use super::{
@@ -14,11 +14,11 @@ use super::{
 };
 
 pub async fn vote_add_domains(
-    contract: &Contract,
+    contract_id: &AccountId,
     accounts: &[Account],
     domains: &[DomainConfig],
 ) -> anyhow::Result<()> {
-    execute_async_handle_calls(accounts, contract, |handle| {
+    execute_async_handle_calls(accounts, contract_id, |handle| {
         let domains = domains.to_vec();
         async move { handle.vote_add_domains(domains).await }
     })
@@ -68,7 +68,7 @@ pub async fn start_keygen_instance(
 }
 
 pub async fn vote_public_key(
-    contract: &Contract,
+    contract_id: &AccountId,
     accounts: &[Account],
     key_event_id: KeyEventId,
     public_key: dtos::PublicKey,
@@ -80,7 +80,7 @@ pub async fn vote_public_key(
 
     execute_async_transactions(
         accounts,
-        contract,
+        contract_id,
         method_names::VOTE_PK,
         &vote_pk_args,
         GAS_FOR_VOTE_PK,

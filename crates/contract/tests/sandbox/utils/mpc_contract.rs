@@ -202,13 +202,13 @@ pub async fn vote_add_launcher_hash(
 
 pub async fn vote_tee_verifier_change(
     accounts: &[Account],
-    contract: &Contract,
+    contract_id: &AccountId,
     verifier: &AccountId,
 ) -> anyhow::Result<()> {
     // Arbitrary: the hash only buckets votes (voters must commit to the same
     // value), the contract never compares it to the deployed verifier code.
     let expected_code_hash = TeeVerifierCodeHash::new([7u8; 32]);
-    execute_async_handle_calls(accounts, contract, |handle| {
+    execute_async_handle_calls(accounts, contract_id, |handle| {
         let verifier = verifier.clone();
         async move {
             handle

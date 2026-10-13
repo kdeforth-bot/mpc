@@ -131,7 +131,6 @@ async fn reshare__should_leave_valid_non_participant_attestations_in_storage() -
 
     do_resharing(
         &mpc_signer_accounts[..threshold.0 as usize],
-        &contract,
         &mpc_contract,
         new_threshold_parameters,
         prospective_epoch_id,
@@ -239,7 +238,6 @@ async fn reshare__should_evict_expired_attestations_via_post_reshare_sweep() -> 
     .unwrap();
     do_resharing(
         &mpc_signer_accounts[..threshold.0 as usize],
-        &contract,
         &mpc_contract,
         new_threshold_parameters,
         dtos::EpochId(6),

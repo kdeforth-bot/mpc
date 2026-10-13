@@ -2,7 +2,7 @@ use near_contract_transport::{CallContract, FunctionCallArgs};
 use near_mpc_contract_interface::client::{MpcContractHandle, MpcContractHandleError};
 use near_sdk::Gas;
 use near_workspaces::{
-    Account, AccountId, Contract, operations::TransactionStatus, result::ExecutionFinalResult,
+    Account, AccountId, operations::TransactionStatus, result::ExecutionFinalResult,
 };
 use serde::Serialize;
 use std::future::Future;
@@ -80,7 +80,7 @@ impl CallContract for AsyncSandboxCaller<'_> {
 
 pub async fn execute_async_transactions(
     accounts: &[Account],
-    contract: &Contract,
+    contract_id: &AccountId,
     function_name: &str,
     json_args: &impl Serialize,
     attached_gas: Gas,
@@ -88,7 +88,7 @@ pub async fn execute_async_transactions(
     let mut transactions = vec![];
     for account in accounts.iter() {
         let result = account
-            .call(contract.id(), function_name)
+            .call(contract_id, function_name)
             .gas(attached_gas)
             .args_json(json_args)
             .transact_async()
@@ -102,17 +102,17 @@ pub async fn execute_async_transactions(
     Ok(())
 }
 
-/// Issues `call` once per account against `contract`, keeping every transaction in flight
+/// Issues `call` once per account against `contract_id`, keeping every transaction in flight
 /// before awaiting any of them, then fails if any receipt failed.
 ///
 /// ```ignore
-/// execute_async_handle_calls(&accounts, &contract, |handle| async move {
+/// execute_async_handle_calls(&accounts, contract.id(), |handle| async move {
 ///     handle.vote_contract_update(update_hash).await
 /// })
 /// ```
 pub async fn execute_async_handle_calls<'a, F, Fut>(
     accounts: &'a [Account],
-    contract: &Contract,
+    contract_id: &AccountId,
     call: F,
 ) -> anyhow::Result<()>
 where
@@ -123,7 +123,7 @@ where
 {
     let mut transactions = vec![];
     for account in accounts {
-        let handle = account.call_mpc_async(contract.id());
+        let handle = account.call_mpc_async(contract_id);
         transactions.push(call(handle).await?);
     }
     for transaction in transactions {

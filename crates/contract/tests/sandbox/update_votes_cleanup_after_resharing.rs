@@ -43,7 +43,7 @@ async fn vote_reshared__should_sweep_contract_update_votes_of_kicked_out_partici
     let threshold = assert_running_return_threshold(&mpc_contract).await;
 
     let update_hash = hash(&Update::Code(vec![1u8; 1000]));
-    execute_async_handle_calls(&mpc_signer_accounts[0..2], &contract, |handle| {
+    execute_async_handle_calls(&mpc_signer_accounts[0..2], contract.id(), |handle| {
         let update_hash = update_hash.clone();
         async move { handle.vote_contract_update(update_hash).await }
     })
@@ -86,7 +86,6 @@ async fn vote_reshared__should_sweep_contract_update_votes_of_kicked_out_partici
 
     do_resharing(
         &mpc_signer_accounts[1..threshold.0 as usize + 1],
-        &contract,
         &mpc_contract,
         new_threshold_parameters,
         prospective_epoch_id,
@@ -148,7 +147,7 @@ async fn add_domain_votes_from_kicked_out_participants_are_cleared_after_reshari
         reconstruction_threshold: ReconstructionThreshold::new(6),
         purpose: DomainPurpose::Sign,
     }];
-    execute_async_handle_calls(&mpc_signer_accounts[0..2], &contract, |handle| {
+    execute_async_handle_calls(&mpc_signer_accounts[0..2], contract.id(), |handle| {
         let domains_to_add = domains_to_add.clone();
         async move { handle.vote_add_domains(domains_to_add).await }
     })
@@ -189,7 +188,6 @@ async fn add_domain_votes_from_kicked_out_participants_are_cleared_after_reshari
 
     do_resharing(
         &mpc_signer_accounts[1..threshold.0 as usize + 1],
-        &contract,
         &mpc_contract,
         new_threshold_parameters,
         prospective_epoch_id,

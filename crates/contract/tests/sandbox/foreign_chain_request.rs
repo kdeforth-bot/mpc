@@ -49,13 +49,7 @@ async fn verify_foreign_transaction__should_succeed(
         .build()
         .await;
     let foreign_tx_key = setup.foreign_tx_key();
-    make_foreign_chain_available(
-        chain,
-        &setup.contract,
-        &setup.mpc_contract,
-        &setup.mpc_signer_accounts,
-    )
-    .await;
+    make_foreign_chain_available(chain, &setup.mpc_contract, &setup.mpc_signer_accounts).await;
 
     let user = setup.worker.dev_create_account().await.unwrap();
     let domain_id = dtos::DomainId(foreign_tx_key.domain_id().0);
@@ -123,13 +117,7 @@ async fn verify_foreign_transaction__should_fan_out_response_to_duplicates_from_
         .build()
         .await;
     let foreign_tx_key = setup.foreign_tx_key();
-    make_foreign_chain_available(
-        chain,
-        &setup.contract,
-        &setup.mpc_contract,
-        &setup.mpc_signer_accounts,
-    )
-    .await;
+    make_foreign_chain_available(chain, &setup.mpc_contract, &setup.mpc_signer_accounts).await;
 
     let alice = setup.worker.dev_create_account().await.unwrap();
     let bob = setup.worker.dev_create_account().await.unwrap();
@@ -210,13 +198,7 @@ async fn respond_verify_foreign_tx__should_reject_response_not_matching_expected
         .build()
         .await;
     let foreign_tx_key = setup.foreign_tx_key();
-    make_foreign_chain_available(
-        chain,
-        &setup.contract,
-        &setup.mpc_contract,
-        &setup.mpc_signer_accounts,
-    )
-    .await;
+    make_foreign_chain_available(chain, &setup.mpc_contract, &setup.mpc_signer_accounts).await;
 
     let user = setup.worker.dev_create_account().await.unwrap();
     let domain_id = dtos::DomainId(foreign_tx_key.domain_id().0);
@@ -280,13 +262,7 @@ async fn verify_foreign_transaction__should_succeed_when_response_matches_expect
         .build()
         .await;
     let foreign_tx_key = setup.foreign_tx_key();
-    make_foreign_chain_available(
-        chain,
-        &setup.contract,
-        &setup.mpc_contract,
-        &setup.mpc_signer_accounts,
-    )
-    .await;
+    make_foreign_chain_available(chain, &setup.mpc_contract, &setup.mpc_signer_accounts).await;
 
     let user = setup.worker.dev_create_account().await.unwrap();
     let domain_id = dtos::DomainId(foreign_tx_key.domain_id().0);
@@ -417,13 +393,7 @@ async fn verify_foreign_transaction__should_timeout_without_response(
         .build()
         .await;
     let foreign_tx_key = setup.foreign_tx_key();
-    make_foreign_chain_available(
-        chain,
-        &setup.contract,
-        &setup.mpc_contract,
-        &setup.mpc_signer_accounts,
-    )
-    .await;
+    make_foreign_chain_available(chain, &setup.mpc_contract, &setup.mpc_signer_accounts).await;
 
     let user = setup.worker.dev_create_account().await.unwrap();
 
