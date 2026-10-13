@@ -15,7 +15,7 @@ use crate::sandbox::{
         },
         shared_key_utils::DomainKey,
         sign_utils::{make_and_submit_requests, submit_ckd_response, submit_signature_response},
-        transactions::CallMpcContract,
+        transactions::{CallMpcContract, CallMpcContractAsSelf},
         views::ViewMpcContract,
     },
 };
@@ -67,8 +67,7 @@ async fn init_old_contract_without_tee_verifier(
             .unwrap()
             .into();
     contract
-        .as_account()
-        .call_mpc(contract.id())
+        .call_mpc()
         .init(threshold_parameters, bogus_tee_verifier_account_id(), None)
         .await?
         .into_result()?;
@@ -115,11 +114,7 @@ async fn upgrade_to_new(old_contract: Contract) -> anyhow::Result<Contract> {
 /// Migrates the contract to a current contract build
 /// and sanity checks that the upgraded code matches compiled contract bytes.
 async fn migrate_and_assert_contract_code(contract: &Contract) -> anyhow::Result<()> {
-    contract
-        .call(method_names::MIGRATE)
-        .transact()
-        .await?
-        .into_result()?;
+    contract.call_mpc().migrate().await?.into_result()?;
     let code_hash_post_upgrade = contract.view_code().await.unwrap();
     let current_code_hash = current_contract();
 
@@ -206,8 +201,8 @@ async fn migrate__should_fail_when_no_tee_verifier_is_configured(
     // When
     let contract = upgrade_to_new(contract).await?;
     let err = contract
-        .call(method_names::MIGRATE)
-        .transact()
+        .call_mpc()
+        .migrate()
         .await?
         .into_result()
         .expect_err("migrate must fail without a configured TEE verifier");
@@ -606,18 +601,16 @@ async fn init_running_rejects_external_callers_pre_initialization() {
         .unwrap()
         .into();
 
-    let init_running_args = serde_json::json!({
-            "domains": [],
-            "next_domain_id": 0,
-            "keyset": dtos::Keyset::new(EpochId::new(2), vec![]),
-            "parameters": threshold_parameters,
-    });
-
     let execution_error = accounts[0]
-        .call(contract.id(), method_names::INIT_RUNNING)
-        .max_gas()
-        .args_json(init_running_args)
-        .transact()
+        .call_mpc(contract.id())
+        .init_running(
+            vec![],
+            0,
+            dtos::Keyset::new(EpochId::new(2), vec![]),
+            threshold_parameters,
+            bogus_tee_verifier_account_id(),
+            None,
+        )
         .await
         .unwrap()
         .into_result()
