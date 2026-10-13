@@ -21,7 +21,10 @@ impl ViewMpcContract for Worker<Sandbox> {
         &self,
         contract_id: &near_account_id::AccountId,
     ) -> MpcContractHandle<SandboxViewer> {
-        MpcContractHandle::new(SandboxViewer::new(self), contract_id.clone())
+        MpcContractHandle::new(
+            SandboxViewer(JsonRpcClient::connect(self.rpc_addr())),
+            contract_id.clone(),
+        )
     }
 }
 
@@ -29,12 +32,6 @@ impl ViewMpcContract for Worker<Sandbox> {
 /// response, which [`ObservedState`] needs.
 #[derive(Clone)]
 pub struct SandboxViewer(JsonRpcClient);
-
-impl SandboxViewer {
-    pub fn new(worker: &Worker<Sandbox>) -> Self {
-        Self(JsonRpcClient::connect(worker.rpc_addr()))
-    }
-}
 
 impl HasPollInterval for SandboxViewer {
     fn poll_interval(&self) -> PollInterval {
