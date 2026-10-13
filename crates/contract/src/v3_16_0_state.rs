@@ -7,6 +7,8 @@
 //! However, this approach (a) requires manual effort from a developer and (b) increases the binary size.
 //! A better approach: only copy the structures that have changed and import the rest from the existing codebase.
 
+use std::collections::BTreeMap;
+
 use borsh::{BorshDeserialize, BorshSerialize};
 use near_mpc_contract_interface::types::{
     CKDRequest, SignatureRequest, VerifyForeignTransactionRequest, YieldIndex,
@@ -20,12 +22,12 @@ use crate::{
     config::Config,
     foreign_chains_metadata::ForeignChainsMetadata,
     node_migrations::NodeMigrations,
-    primitives::key_state::AuthenticatedAccountId,
+    primitives::key_state::{AuthenticatedAccountId, AuthenticatedParticipantId},
     primitives::votes::Votes,
     state::ProtocolContractState,
     storage_keys::StorageKey,
     tee::measurements::{AllowedMeasurements, MeasurementVotes},
-    tee::proposal::{AllowedLauncherImages, LauncherHashVotes, StoredDockerImageHashes},
+    tee::proposal::{AllowedLauncherImages, StoredDockerImageHashes},
     tee::tee_state::{NodeAttestation, NodeId, TeeState},
     tee::verifier_votes::TeeVerifierVotes,
     update::ContractUpdateVotes,
@@ -40,12 +42,18 @@ struct OldNodeAttestation {
     verified_attestation: VerifiedAttestation,
 }
 
+/// Shadow of the `3.16.0` `LauncherHashVotes` layout.
+#[derive(Debug, BorshSerialize, BorshDeserialize)]
+struct OldLauncherHashVotes {
+    vote_by_account: BTreeMap<AuthenticatedParticipantId, dtos::LauncherVoteAction>,
+}
+
 #[derive(Debug, BorshSerialize, BorshDeserialize)]
 struct OldTeeState {
     allowed_docker_image_hashes: StoredDockerImageHashes,
     allowed_launcher_images: AllowedLauncherImages,
     votes: Votes<AuthenticatedAccountId>,
-    launcher_votes: LauncherHashVotes,
+    launcher_votes: OldLauncherHashVotes,
     stored_attestations: IterableMap<dtos::Ed25519PublicKey, OldNodeAttestation>,
     allowed_measurements: AllowedMeasurements,
     measurement_votes: MeasurementVotes,
@@ -53,11 +61,16 @@ struct OldTeeState {
 
 impl From<OldTeeState> for TeeState {
     fn from(old: OldTeeState) -> Self {
+        // Pending votes are dropped rather than migrated; participants re-vote after the
+        // upgrade.
         TeeState {
             allowed_docker_image_hashes: old.allowed_docker_image_hashes,
             allowed_launcher_images: old.allowed_launcher_images,
             votes: old.votes,
-            launcher_votes: old.launcher_votes,
+            launcher_votes: Votes::new(
+                StorageKey::LauncherHashVotesByVoter,
+                StorageKey::LauncherHashVotesByProposal,
+            ),
             stored_attestations: migrate_stored_attestations(old.stored_attestations),
             allowed_measurements: old.allowed_measurements,
             measurement_votes: old.measurement_votes,
