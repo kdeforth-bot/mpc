@@ -105,6 +105,10 @@ impl<C> MpcContractHandle<C> {
         }
     }
 
+    pub fn contract_id(&self) -> &AccountId {
+        &self.contract_id
+    }
+
     /// This method can be used to swap the caller while keeping the contract account.
     pub fn map_caller<D>(self, f: impl FnOnce(C) -> D) -> MpcContractHandle<D> {
         MpcContractHandle {

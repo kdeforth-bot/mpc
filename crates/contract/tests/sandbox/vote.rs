@@ -90,7 +90,7 @@ async fn test_keygen() -> anyhow::Result<()> {
         domain_id: dtos::DomainId(domain_id),
         attempt_id: AttemptId(0),
     };
-    start_keygen_instance(&contract, &mpc_contract, &mpc_signer_accounts, key_event_id)
+    start_keygen_instance(&mpc_contract, &mpc_signer_accounts, key_event_id)
         .await
         .unwrap();
     let public_key: dtos::PublicKey = "ed25519:J75xXmF7WUPS3xCm3hy2tgwLCKdYM1iJd4BWF8sWVnae"

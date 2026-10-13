@@ -42,7 +42,7 @@ pub async fn conclude_resharing(
         if !matches!(state, ProtocolContractState::Resharing(_)) {
             anyhow::bail!("expected resharing state");
         }
-        start_reshare_instance(contract, mpc_contract, all_participants, key_event_id).await?;
+        start_reshare_instance(mpc_contract, all_participants, key_event_id).await?;
 
         vote_reshared(contract, all_participants, key_event_id).await?;
     }
@@ -91,7 +91,6 @@ pub async fn vote_new_parameters(
 }
 
 pub async fn start_reshare_instance(
-    contract: &Contract,
     mpc_contract: &MpcContractHandle<SandboxViewer>,
     accounts: &[Account],
     key_event_id: KeyEventId,
@@ -120,7 +119,10 @@ pub async fn start_reshare_instance(
         })
         .unwrap();
     let result = leader
-        .call(contract.id(), method_names::START_RESHARE_INSTANCE)
+        .call(
+            mpc_contract.contract_id(),
+            method_names::START_RESHARE_INSTANCE,
+        )
         .args_json(json!({"key_event_id": key_event_id}))
         .transact()
         .await?;

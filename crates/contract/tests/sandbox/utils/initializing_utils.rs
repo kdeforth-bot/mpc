@@ -26,7 +26,6 @@ pub async fn vote_add_domains(
 }
 
 pub async fn start_keygen_instance(
-    contract: &Contract,
     mpc_contract: &MpcContractHandle<SandboxViewer>,
     accounts: &[Account],
     key_event_id: KeyEventId,
@@ -55,7 +54,10 @@ pub async fn start_keygen_instance(
         })
         .unwrap();
     let result = leader
-        .call(contract.id(), method_names::START_KEYGEN_INSTANCE)
+        .call(
+            mpc_contract.contract_id(),
+            method_names::START_KEYGEN_INSTANCE,
+        )
         .args_json(json!({"key_event_id": key_event_id}))
         .transact()
         .await?;

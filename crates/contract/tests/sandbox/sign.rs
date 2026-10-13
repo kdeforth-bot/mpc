@@ -76,7 +76,6 @@ async fn test_contract_request_timeout_all_schemes() -> anyhow::Result<()> {
     let mut rng = rand::rngs::StdRng::from_seed([1u8; 32]);
     let SandboxTestSetup {
         worker,
-        contract,
         mpc_contract,
         keys,
         ..
@@ -91,7 +90,7 @@ async fn test_contract_request_timeout_all_schemes() -> anyhow::Result<()> {
         // Check that a sign with no response from MPC network properly errors out:
         let req = DomainResponseTest::new(&mut rng, key, predecessor_id);
         let status = req
-            .submit_request_ensure_included(&alice, &contract, &mpc_contract)
+            .submit_request_ensure_included(&alice, &mpc_contract)
             .await?;
         worker.fast_forward(SIGNATURE_TIMEOUT_BLOCKS).await.unwrap();
         verify_timeout(status).await.unwrap();
@@ -164,7 +163,7 @@ async fn test_contract_fail_refund_all_schemes() -> anyhow::Result<()> {
     for key in &keys {
         let req = DomainResponseTest::new(&mut rng, key, alice.id());
         let status = req
-            .submit_request_ensure_included(&alice, &contract, &mpc_contract)
+            .submit_request_ensure_included(&alice, &mpc_contract)
             .await?;
         worker.fast_forward(SIGNATURE_TIMEOUT_BLOCKS).await.unwrap();
         // we do not respond, sign will fail due to timeout
@@ -422,7 +421,7 @@ async fn test_ckd_gas_regression() -> anyhow::Result<()> {
     let legacy = CKDRequestTest::new(&mut rng, bls_key.domain_id(), alice.id(), sk);
     let legacy_test = DomainResponseTest::CKD(legacy);
     let legacy_request_status = legacy_test
-        .submit_request_ensure_included(&alice, &contract, &mpc_contract)
+        .submit_request_ensure_included(&alice, &mpc_contract)
         .await?;
     let legacy_respond_gas = match &legacy_test {
         DomainResponseTest::CKD(inner) => {
@@ -439,7 +438,7 @@ async fn test_ckd_gas_regression() -> anyhow::Result<()> {
     let pv = CKDRequestTest::new_pv(&mut rng, bls_key.domain_id(), bob.id(), sk);
     let pv_test = DomainResponseTest::CKD(pv);
     let pv_request_status = pv_test
-        .submit_request_ensure_included(&bob, &contract, &mpc_contract)
+        .submit_request_ensure_included(&bob, &mpc_contract)
         .await?;
     let pv_respond_gas = match &pv_test {
         DomainResponseTest::CKD(inner) => {

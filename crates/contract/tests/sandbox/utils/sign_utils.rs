@@ -79,7 +79,7 @@ impl DomainResponseTest {
         attested_account: &Account,
     ) -> anyhow::Result<()> {
         let status = self
-            .submit_request_ensure_included(account, contract, mpc_contract)
+            .submit_request_ensure_included(account, mpc_contract)
             .await?;
         self.submit_response(contract, attested_account).await?;
         self.verify_execution_outcome(status).await?;
@@ -104,10 +104,9 @@ impl DomainResponseTest {
     pub async fn submit_request_ensure_included(
         &self,
         account: &Account,
-        contract: &Contract,
         mpc_contract: &MpcContractHandle<SandboxViewer>,
     ) -> anyhow::Result<TransactionStatus> {
-        let handle = account.call_mpc_async(contract.id());
+        let handle = account.call_mpc_async(mpc_contract.contract_id());
         match self {
             Self::Sign(inner) => {
                 let status = handle.sign(inner.args.clone()).await?;

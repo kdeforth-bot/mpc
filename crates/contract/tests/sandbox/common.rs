@@ -433,13 +433,7 @@ pub async fn vote_and_submit_contract_binary(
     new_contract_binary: &[u8],
 ) {
     let update = Update::Code(new_contract_binary.to_vec());
-    approve_contract_update(
-        contract,
-        mpc_contract,
-        accounts,
-        near_mpc_sdk::update::hash(&update),
-    )
-    .await;
+    approve_contract_update(mpc_contract, accounts, near_mpc_sdk::update::hash(&update)).await;
 
     let execution = accounts[0]
         .call_mpc(contract.id())
@@ -460,7 +454,6 @@ pub async fn vote_and_submit_contract_binary(
 }
 
 pub async fn approve_contract_update(
-    contract: &Contract,
     mpc_contract: &MpcContractHandle<SandboxViewer>,
     accounts: &[Account],
     update_hash: UpdateHash,
@@ -469,7 +462,7 @@ pub async fn approve_contract_update(
     let mut transactions = Vec::with_capacity(threshold);
     for voter in &accounts[..threshold] {
         let transaction = voter
-            .call_mpc_async(contract.id())
+            .call_mpc_async(mpc_contract.contract_id())
             .vote_contract_update(update_hash.clone())
             .await
             .expect("vote transaction is sent");
@@ -638,7 +631,7 @@ pub async fn call_contract_key_generation<const N: usize>(
             domain_id: dtos::DomainId(*domain.id),
             attempt_id: dtos::AttemptId(0),
         };
-        start_keygen_instance(contract, mpc_contract, accounts, key_event_id)
+        start_keygen_instance(mpc_contract, accounts, key_event_id)
             .await
             .unwrap();
         let (public_key, shared_secret_key) = make_key_for_domain(Curve::from(domain.protocol));

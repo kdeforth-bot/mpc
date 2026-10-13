@@ -44,13 +44,7 @@ async fn submit_contract_update__should_accept_a_payload_of_the_maximum_contract
         .build()
         .await;
     let update = Update::Code(vec![0; 1536 * 1024 - 400]); //3900 seems to not work locally
-    approve_contract_update(
-        &contract,
-        &mpc_contract,
-        &mpc_signer_accounts,
-        hash(&update),
-    )
-    .await;
+    approve_contract_update(&mpc_contract, &mpc_signer_accounts, hash(&update)).await;
 
     // When
     let execution = mpc_signer_accounts[0]
@@ -128,13 +122,7 @@ async fn submit_contract_update__should_apply_an_approved_config() {
 
     let update = Update::Config(new_config.clone());
     let old_config = mpc_contract.config().await.unwrap().value;
-    approve_contract_update(
-        &contract,
-        &mpc_contract,
-        &mpc_signer_accounts,
-        hash(&update),
-    )
-    .await;
+    approve_contract_update(&mpc_contract, &mpc_signer_accounts, hash(&update)).await;
 
     // When
     let execution = mpc_signer_accounts[0]
@@ -189,13 +177,7 @@ async fn submit_contract_update__should_keep_the_old_code_when_the_new_binary_is
         .build()
         .await;
     let update = invalid_contract_update();
-    approve_contract_update(
-        &contract,
-        &mpc_contract,
-        &mpc_signer_accounts,
-        hash(&update),
-    )
-    .await;
+    approve_contract_update(&mpc_contract, &mpc_signer_accounts, hash(&update)).await;
 
     // When
     let execution = mpc_signer_accounts[0]
